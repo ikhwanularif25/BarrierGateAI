@@ -26,7 +26,7 @@ VERSION = "1.0.1"
 # MODEL
 # =========================================================
 
-MODEL_PATH = BASE_DIR / "models" / "best.pt"
+MODEL_PATH = BASE_DIR / "models" / "best2.pt"
 
 CONFIDENCE = 0.35
 IMAGE_SIZE = 640
@@ -41,14 +41,14 @@ IMAGE_SIZE = 640
 # "rtsp"
 # "video"
 
-CAMERA_MODE = "webcam"
+CAMERA_MODE = "rtsp"
 
 
 # =========================================================
 # WEBCAM
 # =========================================================
 
-WEBCAM_INDEX = 1
+WEBCAM_INDEX = 0
 
 
 # =========================================================

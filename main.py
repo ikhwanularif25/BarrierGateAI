@@ -44,7 +44,8 @@ def open_camera():
 
         cap = cv2.VideoCapture(
             WEBCAM_INDEX,
-            cv2.CAP_DSHOW
+            # cv2.CAP_DSHOW
+            # cv2.CAP_MSMF
         )
 
     # =====================================================
