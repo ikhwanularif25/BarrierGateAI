@@ -19,14 +19,14 @@ load_dotenv(BASE_DIR / ".env")
 # =========================================================
 
 PROJECT_NAME = "Smart Barrier Gate AI"
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 
 
 # =========================================================
 # MODEL
 # =========================================================
 
-MODEL_PATH = BASE_DIR / "models" / "best2.pt"
+MODEL_PATH = BASE_DIR / "models" / "best.pt"
 
 CONFIDENCE = 0.35
 IMAGE_SIZE = 640
@@ -48,7 +48,7 @@ CAMERA_MODE = "rtsp"
 # WEBCAM
 # =========================================================
 
-WEBCAM_INDEX = 0
+WEBCAM_INDEX = 1
 
 
 # =========================================================
@@ -70,10 +70,6 @@ CCTV_PORT = int(
     os.getenv("CCTV_PORT", "554")
 )
 
-CAMERA_NUMBER = int(
-    os.getenv("CAMERA_NUMBER", "14")
-)
-
 STREAM_NUMBER = os.getenv(
     "STREAM_NUMBER",
     "02"
@@ -81,10 +77,23 @@ STREAM_NUMBER = os.getenv(
 
 
 # =========================================================
+# CAMERA AUTO ROTATION
+# =========================================================
+
+CAMERA_AUTO_ROTATE = True
+
+CAMERA_START = 1
+CAMERA_END = 16
+
+# Ganti kamera setiap 10 detik
+CAMERA_SWITCH_INTERVAL = 10
+
+
+# =========================================================
 # VALIDATE ENV
 # =========================================================
 
-if CAMERA_MODE == "rtsp":
+if CAMERA_MODE.strip().lower() == "rtsp":
 
     required_env = {
         "CCTV_IP": CCTV_IP,
@@ -106,11 +115,8 @@ if CAMERA_MODE == "rtsp":
 
 
 # =========================================================
-# RTSP URL
+# URL ENCODING
 # =========================================================
-
-# Password harus URL encoded.
-# Contoh @ menjadi %40 secara otomatis.
 
 CCTV_USERNAME_ENCODED = quote(
     CCTV_USERNAME or "",
@@ -122,34 +128,45 @@ CCTV_PASSWORD_ENCODED = quote(
     safe=""
 )
 
-# Camera 14:
-# 1401 = main stream
-# 1402 = sub stream
 
-CCTV_CHANNEL = (
-    f"{CAMERA_NUMBER}"
-    f"{STREAM_NUMBER}"
-)
+# =========================================================
+# RTSP URL GENERATOR
+# =========================================================
 
-RTSP_URL = (
-    f"rtsp://"
-    f"{CCTV_USERNAME_ENCODED}:"
-    f"{CCTV_PASSWORD_ENCODED}"
-    f"@{CCTV_IP}:"
-    f"{CCTV_PORT}"
-    f"/Streaming/Channels/"
-    f"{CCTV_CHANNEL}"
-)
+def get_cctv_channel(camera_number: int) -> str:
+    """
+    Contoh substream:
+    Cam001 -> 102
+    Cam002 -> 202
+    Cam014 -> 1402
+    Cam016 -> 1602
+    """
+
+    return f"{camera_number}{STREAM_NUMBER}"
+
+
+def get_rtsp_url(camera_number: int) -> str:
+
+    channel = get_cctv_channel(
+        camera_number
+    )
+
+    return (
+        f"rtsp://"
+        f"{CCTV_USERNAME_ENCODED}:"
+        f"{CCTV_PASSWORD_ENCODED}"
+        f"@{CCTV_IP}:"
+        f"{CCTV_PORT}"
+        f"/Streaming/Channels/"
+        f"{channel}"
+    )
 
 
 # =========================================================
 # DISPLAY
 # =========================================================
 
-WINDOW_NAME = (
-    f"{PROJECT_NAME} - "
-    f"Cam{CAMERA_NUMBER:03d}"
-)
+WINDOW_NAME = PROJECT_NAME
 
 FULLSCREEN = True
 

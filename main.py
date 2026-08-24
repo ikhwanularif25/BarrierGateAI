@@ -6,12 +6,21 @@ from config import (
     CONFIDENCE,
     IMAGE_SIZE,
     WINDOW_NAME,
+
     CAMERA_MODE,
     WEBCAM_INDEX,
-    RTSP_URL,
-    CAMERA_NUMBER,
-    CCTV_CHANNEL,
     VIDEO_PATH,
+
+    CCTV_IP,
+    STREAM_NUMBER,
+    get_rtsp_url,
+    get_cctv_channel,
+
+    CAMERA_AUTO_ROTATE,
+    CAMERA_START,
+    CAMERA_END,
+    CAMERA_SWITCH_INTERVAL,
+
     FULLSCREEN,
     DISPLAY_WIDTH,
     DISPLAY_HEIGHT,
@@ -25,14 +34,72 @@ from ui import BarrierGateUI
 
 
 # =========================================================
+# OPEN RTSP CAMERA
+# =========================================================
+
+def open_rtsp_camera(camera_number):
+
+    rtsp_url = get_rtsp_url(
+        camera_number
+    )
+
+    channel = get_cctv_channel(
+        camera_number
+    )
+
+    print()
+    print("=" * 60)
+    print(
+        f"OPENING Cam{camera_number:03d}"
+    )
+    print(
+        f"Channel : {channel}"
+    )
+    print(
+        f"IP      : {CCTV_IP}"
+    )
+    print("=" * 60)
+
+    cap = cv2.VideoCapture(
+        rtsp_url,
+        cv2.CAP_FFMPEG
+    )
+
+    cap.set(
+        cv2.CAP_PROP_BUFFERSIZE,
+        1
+    )
+
+    if cap.isOpened():
+
+        print(
+            f"Cam{camera_number:03d} connected successfully."
+        )
+
+    else:
+
+        print(
+            f"WARNING: Cam{camera_number:03d} "
+            f"tidak dapat dibuka."
+        )
+
+    return cap
+
+
+# =========================================================
 # OPEN CAMERA
 # =========================================================
 
-def open_camera():
+def open_camera(
+    camera_number=None
+):
 
     mode = CAMERA_MODE.strip().lower()
 
-    print("CAMERA_MODE:", mode)
+    print(
+        "CAMERA_MODE:",
+        mode
+    )
 
     # =====================================================
     # WEBCAM
@@ -40,64 +107,125 @@ def open_camera():
 
     if mode == "webcam":
 
-        print("Opening Webcam...")
+        print(
+            "Opening Webcam..."
+        )
 
         cap = cv2.VideoCapture(
             WEBCAM_INDEX,
-            # cv2.CAP_DSHOW
-            # cv2.CAP_MSMF
+            cv2.CAP_DSHOW
         )
-
-    # =====================================================
-    # RTSP CCTV
-    # =====================================================
-
-    elif mode == "rtsp":
-
-        print("Opening CCTV RTSP...")
-        print(f"Camera : Cam{CAMERA_NUMBER:03d}")
-        print(f"Channel: {CCTV_CHANNEL}")
-
-        cap = cv2.VideoCapture(
-            RTSP_URL,
-            cv2.CAP_FFMPEG
-        )
-
-    # =====================================================
-    # VIDEO FILE
-    # =====================================================
-
-    elif mode == "video":
-
-        print("Opening recorded video...")
-        print("Video:", VIDEO_PATH)
-
-        if not VIDEO_PATH.exists():
-
-            raise FileNotFoundError(
-                f"Video tidak ditemukan: {VIDEO_PATH}"
-            )
-
-        cap = cv2.VideoCapture(
-            str(VIDEO_PATH)
-        )
-
-    else:
-
-        raise ValueError(
-            f"CAMERA_MODE tidak valid: {CAMERA_MODE}. "
-            "Gunakan 'webcam', 'rtsp', atau 'video'."
-        )
-
-    # Untuk webcam / RTSP
-    if mode != "video":
 
         cap.set(
             cv2.CAP_PROP_BUFFERSIZE,
             1
         )
 
-    return cap
+        return cap
+
+    # =====================================================
+    # RTSP
+    # =====================================================
+
+    elif mode == "rtsp":
+
+        if camera_number is None:
+            camera_number = CAMERA_START
+
+        return open_rtsp_camera(
+            camera_number
+        )
+
+    # =====================================================
+    # VIDEO
+    # =====================================================
+
+    elif mode == "video":
+
+        print(
+            "Opening recorded video..."
+        )
+
+        print(
+            "Video:",
+            VIDEO_PATH
+        )
+
+        if not VIDEO_PATH.exists():
+
+            raise FileNotFoundError(
+                f"Video tidak ditemukan: "
+                f"{VIDEO_PATH}"
+            )
+
+        return cv2.VideoCapture(
+            str(VIDEO_PATH)
+        )
+
+    else:
+
+        raise ValueError(
+            f"CAMERA_MODE tidak valid: "
+            f"{CAMERA_MODE}. "
+            f"Gunakan 'webcam', 'rtsp', "
+            f"atau 'video'."
+        )
+
+
+# =========================================================
+# GET NEXT CAMERA
+# =========================================================
+
+def get_next_camera(
+    current_camera
+):
+
+    next_camera = (
+        current_camera + 1
+    )
+
+    if next_camera > CAMERA_END:
+
+        next_camera = (
+            CAMERA_START
+        )
+
+    return next_camera
+
+
+# =========================================================
+# SWITCH CAMERA
+# =========================================================
+
+def switch_camera(
+    cap,
+    current_camera
+):
+
+    if cap is not None:
+
+        cap.release()
+
+    next_camera = get_next_camera(
+        current_camera
+    )
+
+    print()
+    print(
+        f"Switching "
+        f"Cam{current_camera:03d}"
+        f" -> "
+        f"Cam{next_camera:03d}"
+    )
+
+    new_cap = open_rtsp_camera(
+        next_camera
+    )
+
+    return (
+        new_cap,
+        next_camera
+    )
 
 
 # =========================================================
@@ -106,9 +234,15 @@ def open_camera():
 
 def main():
 
-    # -----------------------------------------------------
+    mode = (
+        CAMERA_MODE
+        .strip()
+        .lower()
+    )
+
+    # =====================================================
     # MODEL
-    # -----------------------------------------------------
+    # =====================================================
 
     detector = Detector(
         model_path=MODEL_PATH,
@@ -116,9 +250,9 @@ def main():
         image_size=IMAGE_SIZE
     )
 
-    # -----------------------------------------------------
+    # =====================================================
     # UI
-    # -----------------------------------------------------
+    # =====================================================
 
     ui = BarrierGateUI(
         width=DISPLAY_WIDTH,
@@ -128,35 +262,51 @@ def main():
         max_distance=MAX_DISTANCE
     )
 
-    # -----------------------------------------------------
-    # CAMERA
-    # -----------------------------------------------------
+    # =====================================================
+    # CURRENT CAMERA
+    # =====================================================
 
-    cap = open_camera()
+    current_camera = (
+        CAMERA_START
+    )
+
+    # =====================================================
+    # OPEN CAMERA
+    # =====================================================
+
+    cap = open_camera(
+        current_camera
+        if mode == "rtsp"
+        else None
+    )
 
     if not cap.isOpened():
 
         print(
-            "ERROR: Kamera tidak dapat dibuka."
+            "ERROR: Kamera pertama "
+            "tidak dapat dibuka."
         )
 
-        return
+        # Kalau RTSP rotation aktif,
+        # jangan langsung matikan aplikasi.
+        if not (
+            mode == "rtsp"
+            and CAMERA_AUTO_ROTATE
+        ):
 
-    print(
-        "Camera connected successfully."
+            return
+
+    # =====================================================
+    # CAMERA SWITCH TIMER
+    # =====================================================
+
+    camera_switch_time = (
+        time.monotonic()
     )
 
-    camera_fps = cap.get(
-        cv2.CAP_PROP_FPS
-    )
-
-    print(
-        f"Camera FPS: {camera_fps:.1f}"
-    )
-
-    # -----------------------------------------------------
+    # =====================================================
     # WINDOW
-    # -----------------------------------------------------
+    # =====================================================
 
     cv2.namedWindow(
         WINDOW_NAME,
@@ -171,15 +321,15 @@ def main():
             cv2.WINDOW_FULLSCREEN
         )
 
-    # -----------------------------------------------------
+    # =====================================================
     # FPS
-    # -----------------------------------------------------
+    # =====================================================
 
-    previous_time = time.perf_counter()
+    previous_time = (
+        time.perf_counter()
+    )
 
     fps = 0.0
-
-    # Smooth FPS
     fps_smooth = 0.0
 
     # =====================================================
@@ -188,27 +338,126 @@ def main():
 
     while True:
 
+        # =================================================
+        # AUTO SWITCH CAMERA
+        # =================================================
+
+        if (
+            mode == "rtsp"
+            and CAMERA_AUTO_ROTATE
+        ):
+
+            elapsed = (
+                time.monotonic()
+                - camera_switch_time
+            )
+
+            if (
+                elapsed
+                >= CAMERA_SWITCH_INTERVAL
+            ):
+
+                (
+                    cap,
+                    current_camera
+                ) = switch_camera(
+                    cap,
+                    current_camera
+                )
+
+                camera_switch_time = (
+                    time.monotonic()
+                )
+
+                # Reset FPS supaya tidak kacau
+                # setelah reconnect.
+                previous_time = (
+                    time.perf_counter()
+                )
+
+                fps_smooth = 0.0
+
+                continue
+
+        # =================================================
+        # READ FRAME
+        # =================================================
+
         ret, frame = cap.read()
 
         if not ret:
 
             print(
-                "Frame kamera gagal dibaca."
+                f"Frame gagal dibaca"
+                + (
+                    f" dari Cam"
+                    f"{current_camera:03d}"
+                    if mode == "rtsp"
+                    else ""
+                )
             )
 
-            break
+            # =============================================
+            # RTSP: SKIP CAMERA ERROR
+            # =============================================
 
-        # -------------------------------------------------
+            if (
+                mode == "rtsp"
+                and CAMERA_AUTO_ROTATE
+            ):
+
+                (
+                    cap,
+                    current_camera
+                ) = switch_camera(
+                    cap,
+                    current_camera
+                )
+
+                camera_switch_time = (
+                    time.monotonic()
+                )
+
+                previous_time = (
+                    time.perf_counter()
+                )
+
+                fps_smooth = 0.0
+
+                continue
+
+            # =============================================
+            # VIDEO: LOOP
+            # =============================================
+
+            elif mode == "video":
+
+                print(
+                    "Video selesai. Restart..."
+                )
+
+                cap.set(
+                    cv2.CAP_PROP_POS_FRAMES,
+                    0
+                )
+
+                continue
+
+            else:
+
+                break
+
+        # =================================================
         # YOLO
-        # -------------------------------------------------
+        # =================================================
 
         result = detector.detect(
             frame
         )
 
-        # -------------------------------------------------
+        # =================================================
         # INFERENCE TIME
-        # -------------------------------------------------
+        # =================================================
 
         inference_ms = 0.0
 
@@ -217,14 +466,16 @@ def main():
             "speed"
         ):
 
-            inference_ms = result.speed.get(
-                "inference",
-                0.0
+            inference_ms = (
+                result.speed.get(
+                    "inference",
+                    0.0
+                )
             )
 
-        # -------------------------------------------------
+        # =================================================
         # DETECTION DATA
-        # -------------------------------------------------
+        # =================================================
 
         detections = []
 
@@ -264,9 +515,9 @@ def main():
                 }
             )
 
-        # -------------------------------------------------
+        # =================================================
         # FPS
-        # -------------------------------------------------
+        # =================================================
 
         current_time = (
             time.perf_counter()
@@ -284,10 +535,10 @@ def main():
         if delta > 0:
 
             fps = (
-                1.0 / delta
+                1.0
+                / delta
             )
 
-        # Smooth FPS supaya angka tidak loncat-loncat
         if fps_smooth == 0:
 
             fps_smooth = fps
@@ -302,9 +553,9 @@ def main():
                 * fps
             )
 
-        # -------------------------------------------------
+        # =================================================
         # UI
-        # -------------------------------------------------
+        # =================================================
 
         display = ui.render(
             frame=frame,
@@ -313,18 +564,67 @@ def main():
             inference_ms=inference_ms
         )
 
-        # -------------------------------------------------
+        # =================================================
+        # CAMERA INFO OVERLAY
+        # =================================================
+
+        if mode == "rtsp":
+
+            camera_text = (
+                f"CAM {current_camera:03d}"
+            )
+
+            cv2.putText(
+                display,
+                camera_text,
+                (25, 100),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255, 255, 255),
+                2,
+                cv2.LINE_AA
+            )
+
+            # Countdown camera switch
+            elapsed = (
+                time.monotonic()
+                - camera_switch_time
+            )
+
+            remaining = max(
+                0,
+                CAMERA_SWITCH_INTERVAL
+                - elapsed
+            )
+
+            switch_text = (
+                f"NEXT CAMERA: "
+                f"{remaining:.1f}s"
+            )
+
+            cv2.putText(
+                display,
+                switch_text,
+                (25, 130),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (0, 255, 255),
+                2,
+                cv2.LINE_AA
+            )
+
+        # =================================================
         # SHOW
-        # -------------------------------------------------
+        # =================================================
 
         cv2.imshow(
             WINDOW_NAME,
             display
         )
 
-        # -------------------------------------------------
+        # =================================================
         # KEYBOARD
-        # -------------------------------------------------
+        # =================================================
 
         key = (
             cv2.waitKey(1)
@@ -334,11 +634,34 @@ def main():
         # Q / ESC
         if (
             key == ord("q")
-            or
-            key == 27
+            or key == 27
         ):
 
             break
+
+        # N = manual next camera
+        if (
+            key == ord("n")
+            and mode == "rtsp"
+        ):
+
+            (
+                cap,
+                current_camera
+            ) = switch_camera(
+                cap,
+                current_camera
+            )
+
+            camera_switch_time = (
+                time.monotonic()
+            )
+
+            previous_time = (
+                time.perf_counter()
+            )
+
+            fps_smooth = 0.0
 
     # =====================================================
     # CLEANUP
