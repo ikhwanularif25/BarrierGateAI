@@ -26,10 +26,10 @@ VERSION = "1.0.1"
 # MODEL
 # =========================================================
 
-MODEL_PATH = BASE_DIR / "models" / "best.pt"
+MODEL_PATH = BASE_DIR / "models" / "best2.pt"
 
 CONFIDENCE = 0.35
-IMAGE_SIZE = 416 #640
+IMAGE_SIZE = 640 #416 
 
 
 # =========================================================
@@ -153,10 +153,10 @@ WINDOW_NAME = (
 
 FULLSCREEN = True
 
-DISPLAY_WIDTH = 1648
-DISPLAY_HEIGHT = 928
+DISPLAY_WIDTH = 1920
+DISPLAY_HEIGHT = 1080
 
-TOP_BAR_HEIGHT = 70
-BOTTOM_PANEL_HEIGHT = 190
+TOP_BAR_HEIGHT = 100
+BOTTOM_PANEL_HEIGHT = 70
 
 MAX_DISTANCE = 5.0
