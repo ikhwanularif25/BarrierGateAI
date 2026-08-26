@@ -26,10 +26,10 @@ VERSION = "1.0.1"
 # MODEL
 # =========================================================
 
-MODEL_PATH = BASE_DIR / "models" / "best2.pt"
+MODEL_PATH = BASE_DIR / "models" / "best.pt"
 
 CONFIDENCE = 0.35
-IMAGE_SIZE = 640
+IMAGE_SIZE = 416 #640
 
 
 # =========================================================
