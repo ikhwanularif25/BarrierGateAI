@@ -14,6 +14,9 @@ import requests
 class FunctionalTestLogger:
     """Non-blocking logger untuk functional test Barrier Gate AI.
 
+    Logger TIDAK menentukan ROI/gate rule sendiri.
+    Caller wajib mengirim hanya detection yang sudah lolos rule UI2.
+
     - Snapshot disimpan lokal.
     - Event dikirim ke Google Apps Script webhook bila URL tersedia.
     - Cooldown per zone + class mencegah spam satu objek setiap frame.
@@ -75,28 +78,30 @@ class FunctionalTestLogger:
         self.last_event[key] = now
         return True
 
-    def process(self, frame, detections, source="AI"):
-        """Cari detection yang perlu dicatat dan enqueue tanpa blocking inference."""
-        if frame is None or not detections:
+    def process(
+        self,
+        snapshot_frame,
+        qualified_detections,
+        source="FUNCTIONAL_TEST_UI2",
+        zone="OUT",
+    ):
+        """Log hanya detection yang SUDAH lolos rule UI2.
+
+        `snapshot_frame` adalah canvas UI2 final agar gambar yang dikirim
+        identik dengan tampilan operator.
+        """
+        if snapshot_frame is None or not qualified_detections:
             return 0
 
-        frame_h, frame_w = frame.shape[:2]
-        center_line = frame_w / 2.0
         logged = 0
 
-        for obj in detections:
+        for obj in qualified_detections:
             class_name = self._normalize_name(obj.get("name", ""))
+
             if class_name not in self.TRACKED_CLASSES:
                 continue
 
-            x1 = int(obj.get("x1", 0))
-            y1 = int(obj.get("y1", 0))
-            x2 = int(obj.get("x2", 0))
-            y2 = int(obj.get("y2", 0))
             confidence = float(obj.get("confidence", 0.0))
-
-            object_center_x = (x1 + x2) / 2.0
-            zone = "IN" if object_center_x < center_line else "OUT"
 
             if not self._can_log(zone, class_name):
                 continue
@@ -104,25 +109,17 @@ class FunctionalTestLogger:
             event_id = uuid.uuid4().hex[:12]
             timestamp = datetime.now()
             timestamp_text = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+
             filename = (
                 f"{timestamp.strftime('%Y%m%d_%H%M%S_%f')[:-3]}_"
                 f"{self.camera_name}_{zone}_{class_name}_{event_id}.jpg"
             )
             image_path = self.snapshot_dir / filename
 
-            snapshot = frame.copy()
-            self._annotate(
-                snapshot,
-                zone=zone,
-                class_name=class_name,
-                confidence=confidence,
-                box=(x1, y1, x2, y2),
-                timestamp=timestamp_text,
-            )
-
+            # Simpan canvas UI2 apa adanya. Tidak menggambar overlay baru.
             cv2.imwrite(
                 str(image_path),
-                snapshot,
+                snapshot_frame,
                 [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality],
             )
 
@@ -132,9 +129,12 @@ class FunctionalTestLogger:
                 "camera": self.camera_name,
                 "zone": zone,
                 "detection": class_name,
-                "load_status": "LOADED" if class_name.endswith("_loaded") else "EMPTY",
+                "load_status": (
+                    "LOADED" if class_name.endswith("_loaded") else "EMPTY"
+                ),
                 "confidence": round(confidence, 4),
                 "source": source,
+                "rule": "CENTER_POINT_INSIDE_UI2_ROI",
                 "snapshot_file": filename,
                 "local_snapshot": str(image_path),
             }
@@ -143,40 +143,13 @@ class FunctionalTestLogger:
                 self.jobs.put_nowait((event, image_path))
                 logged += 1
                 print(
-                    f"[FUNCTION TEST] queued | {zone} | {class_name} | "
-                    f"conf={confidence:.2f} | {filename}"
+                    f"[FUNCTION TEST] qualified + queued | {zone} | "
+                    f"{class_name} | conf={confidence:.2f} | {filename}"
                 )
             except queue.Full:
                 print("[FUNCTION TEST] upload queue penuh, event dilewati")
 
         return logged
-
-    def _annotate(self, image, zone, class_name, confidence, box, timestamp):
-        x1, y1, x2, y2 = box
-        color = (0, 255, 0) if class_name.endswith("_loaded") else (0, 230, 255)
-
-        cv2.rectangle(image, (x1, y1), (x2, y2), color, 3)
-        label = f"{zone} | {class_name} | {confidence:.2f}"
-        cv2.putText(
-            image,
-            label,
-            (max(10, x1), max(30, y1 - 10)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            color,
-            2,
-            cv2.LINE_AA,
-        )
-        cv2.putText(
-            image,
-            timestamp,
-            (20, 35),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.7,
-            (255, 255, 255),
-            2,
-            cv2.LINE_AA,
-        )
 
     def _worker_loop(self):
         while self.running or not self.jobs.empty():
