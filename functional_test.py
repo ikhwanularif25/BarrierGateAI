@@ -224,6 +224,9 @@ def main():
 
                 frame_timestamp = time.perf_counter()
 
+            # =================================================
+            # YOLO - sama seperti UI2
+            # =================================================
             result = detector.detect(frame)
             detections = convert_detections(result, detector)
             detection_count = len(detections)
@@ -232,6 +235,9 @@ def main():
             if hasattr(result, "speed"):
                 inference_ms = result.speed.get("inference", 0.0)
 
+            # =================================================
+            # FPS - sama pola dengan main UI2
+            # =================================================
             current_time = time.perf_counter()
             delta = current_time - previous_time
             previous_time = current_time
@@ -242,7 +248,9 @@ def main():
             else:
                 fps_smooth = (fps_smooth * 0.90) + (fps * 0.10)
 
-            # Render menggunakan UI2 asli.
+            # =================================================
+            # RENDER UI2 ASLI
+            # =================================================
             display = ui.render(
                 frame=frame,
                 detections=detections,
@@ -252,7 +260,24 @@ def main():
                 validate_right=validate_right,
             )
 
-            # Overlay yang memang ada pada main UI2.
+            # =================================================
+            # HANYA DATA YANG LOLOS KETENTUAN UI2
+            # =================================================
+            qualified = get_ui2_qualified_detections(
+                ui,
+                frame,
+                detections,
+            )
+
+            new_logs = logger.process(
+                snapshot_frame=display,
+                qualified_detections=qualified,
+                source="FUNCTIONAL_TEST_UI2",
+                zone="OUT",
+            )
+            total_logged += new_logs
+
+            # Overlay latency/detection count dipertahankan seperti main UI2.
             if mode == "rtsp":
                 total_latency_ms = (
                     time.perf_counter() - frame_timestamp
@@ -297,21 +322,6 @@ def main():
                 2,
                 cv2.LINE_AA,
             )
-
-            # Hanya class valid yang center point-nya masuk polygon UI2.
-            qualified = get_ui2_qualified_detections(
-                ui,
-                frame,
-                detections,
-            )
-
-            new_logs = logger.process(
-                snapshot_frame=display,
-                qualified_detections=qualified,
-                source="FUNCTIONAL_TEST_UI2",
-                zone="OUT",
-            )
-            total_logged += new_logs
 
             cv2.imshow(WINDOW_NAME, display)
             key = cv2.waitKey(1) & 0xFF

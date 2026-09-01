@@ -85,7 +85,11 @@ class FunctionalTestLogger:
         source="FUNCTIONAL_TEST_UI2",
         zone="OUT",
     ):
-        """Log hanya detection yang SUDAH lolos rule UI2."""
+        """Log hanya detection yang SUDAH lolos rule UI2.
+
+        `snapshot_frame` adalah canvas UI2 final agar gambar yang dikirim
+        identik dengan tampilan operator.
+        """
         if snapshot_frame is None or not qualified_detections:
             return 0
 
