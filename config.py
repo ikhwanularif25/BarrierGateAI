@@ -28,8 +28,19 @@ VERSION = "1.0.1"
 
 MODEL_PATH = BASE_DIR / "models" / "best2.pt"
 
+# Global YOLO threshold. Detection di bawah nilai ini tidak dikeluarkan model.
 CONFIDENCE = 0.35
 IMAGE_SIZE = 416 #640
+
+# =========================================================
+# CLASS-SPECIFIC CONFIDENCE FILTER
+# =========================================================
+# Filter tambahan setelah YOLO.
+# Dibuat terpisah karena keputusan EMPTY lebih kritis: EMPTY dapat menjadi
+# dasar auto-open, sedangkan LOADED harus cukup yakin sebelum dicatat.
+
+MIN_CONF_EMPTY = 0.55
+MIN_CONF_LOADED = 0.65
 
 
 # =========================================================

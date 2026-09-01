@@ -10,6 +10,8 @@ from pathlib import Path
 import cv2
 import requests
 
+from config import MIN_CONF_EMPTY, MIN_CONF_LOADED
+
 
 class FunctionalTestLogger:
     """Non-blocking logger untuk functional test Barrier Gate AI.
@@ -20,6 +22,7 @@ class FunctionalTestLogger:
     - Snapshot disimpan lokal.
     - Event dikirim ke Google Apps Script webhook bila URL tersedia.
     - Cooldown per zone + class mencegah spam satu objek setiap frame.
+    - Confidence threshold per status dibaca dari config.py.
     """
 
     TRACKED_CLASSES = {
@@ -59,6 +62,12 @@ class FunctionalTestLogger:
         )
         self.worker.start()
 
+        print(
+            "Functional test thresholds: "
+            f"EMPTY>={MIN_CONF_EMPTY:.2f}, "
+            f"LOADED>={MIN_CONF_LOADED:.2f}"
+        )
+
         if self.webhook_url:
             print("Functional test webhook: ENABLED")
         else:
@@ -66,6 +75,15 @@ class FunctionalTestLogger:
 
     def _normalize_name(self, name):
         return str(name).replace("empety", "empty").strip().lower()
+
+    def _passes_confidence(self, class_name, confidence):
+        if class_name.endswith("_loaded"):
+            return confidence >= MIN_CONF_LOADED
+
+        if class_name.endswith("_empty"):
+            return confidence >= MIN_CONF_EMPTY
+
+        return False
 
     def _can_log(self, zone, class_name):
         key = f"{zone}:{class_name}"
@@ -85,7 +103,7 @@ class FunctionalTestLogger:
         source="FUNCTIONAL_TEST_UI2",
         zone="OUT",
     ):
-        """Log hanya detection yang SUDAH lolos rule UI2.
+        """Log hanya detection yang SUDAH lolos rule UI2 dan confidence filter.
 
         `snapshot_frame` adalah canvas UI2 final agar gambar yang dikirim
         identik dengan tampilan operator.
@@ -102,6 +120,13 @@ class FunctionalTestLogger:
                 continue
 
             confidence = float(obj.get("confidence", 0.0))
+
+            if not self._passes_confidence(class_name, confidence):
+                print(
+                    f"[FUNCTION TEST] confidence rejected | {class_name} | "
+                    f"conf={confidence:.2f}"
+                )
+                continue
 
             if not self._can_log(zone, class_name):
                 continue
@@ -134,7 +159,10 @@ class FunctionalTestLogger:
                 ),
                 "confidence": round(confidence, 4),
                 "source": source,
-                "rule": "CENTER_POINT_INSIDE_UI2_ROI",
+                "rule": (
+                    "CENTER_POINT_INSIDE_UI2_ROI+"
+                    "CLASS_SPECIFIC_CONFIDENCE"
+                ),
                 "snapshot_file": filename,
                 "local_snapshot": str(image_path),
             }
