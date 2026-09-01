@@ -14,11 +14,7 @@ __pycache__/
 # Environment / secrets
 .env
 
-# Models
-models/*.pt
-models/*.onnx
-models/*.xml
-models/*.bin
+
 
 # Videos / CCTV recordings
 videos/*.mp4
