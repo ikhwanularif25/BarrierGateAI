@@ -185,9 +185,9 @@ class BarrierGateUI:
         """
         pts = np.array(
             [
-                (int(frame_w * 0.36), int(frame_h * 0.58)),
-                (int(frame_w * 0.58), int(frame_h * 0.32)),
-                (int(frame_w * 0.82), int(frame_h * 0.67)),
+                (int(frame_w * 0.32), int(frame_h * 0.40)),
+                (int(frame_w * 0.58), int(frame_h * 0.16)),
+                (int(frame_w * 0.90), int(frame_h * 0.58)),
                 (int(frame_w * 0.57), int(frame_h * 1.03)),
             ],
             dtype=np.int32
@@ -410,7 +410,7 @@ class BarrierGateUI:
                 self.put_text(
                     frame,
                     label,
-                    (x1, max(20, y1 - 8)),
+                    (x1, max(00, y1 - 8)),
                     scale=0.50,
                     color=color,
                     thickness=2
