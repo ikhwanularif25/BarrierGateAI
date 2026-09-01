@@ -8,20 +8,26 @@ class BarrierGateUI:
         self,
         width=1920,
         height=1080,
-        top_height=90,
-        bottom_height=60,
+        top_height=100,
+        bottom_height=70,
         max_distance=5.0
     ):
+
         self.width = width
         self.height = height
+
         self.top_height = top_height
         self.bottom_height = bottom_height
+
         self.max_distance = max_distance
 
         # =====================================================
-        # COLORS (BGR)
+        # COLORS - BGR
         # =====================================================
+
         self.bg_black = (0, 0, 0)
+
+        self.panel_gray = (120, 120, 120)
         self.header_gray = (115, 115, 115)
 
         self.white = (245, 245, 245)
@@ -30,13 +36,25 @@ class BarrierGateUI:
         self.yellow = (0, 230, 255)
         self.green = (80, 190, 80)
         self.red = (40, 40, 255)
-        self.gray = (170, 170, 170)
 
         self.pink = (180, 105, 255)
+
+        self.gray = (170, 170, 170)
+
+        # =====================================================
+        # LAYOUT
+        # =====================================================
+
+        self.outer_margin = 14
+        self.zone_gap = 14
+
+        self.info_bar_height = 95
+        self.zone_border = 8
 
     # =========================================================
     # TEXT
     # =========================================================
+
     def put_text(
         self,
         image,
@@ -46,6 +64,7 @@ class BarrierGateUI:
         color=(255, 255, 255),
         thickness=2
     ):
+
         cv2.putText(
             image,
             text,
@@ -56,6 +75,10 @@ class BarrierGateUI:
             thickness,
             cv2.LINE_AA
         )
+
+    # =========================================================
+    # CENTER TEXT
+    # =========================================================
 
     def put_center_text(
         self,
@@ -69,6 +92,7 @@ class BarrierGateUI:
         color=(255, 255, 255),
         thickness=2
     ):
+
         text_size = cv2.getTextSize(
             text,
             cv2.FONT_HERSHEY_SIMPLEX,
@@ -76,8 +100,15 @@ class BarrierGateUI:
             thickness
         )[0]
 
-        text_x = x1 + ((x2 - x1) - text_size[0]) // 2
-        text_y = y1 + ((y2 - y1) + text_size[1]) // 2
+        text_x = (
+            x1
+            + ((x2 - x1) - text_size[0]) // 2
+        )
+
+        text_y = (
+            y1
+            + ((y2 - y1) + text_size[1]) // 2
+        )
 
         self.put_text(
             image,
@@ -91,69 +122,64 @@ class BarrierGateUI:
     # =========================================================
     # HEADER
     # =========================================================
+
     def draw_header(
         self,
         canvas,
         fps,
-        inference_ms,
-        gate_logic
+        inference_ms
     ):
+
         cv2.rectangle(
             canvas,
-            (0, 0),
-            (self.width, self.top_height),
+            (
+                self.outer_margin,
+                self.outer_margin
+            ),
+            (
+                self.width - self.outer_margin,
+                self.top_height
+            ),
             self.header_gray,
             -1
         )
 
-        # Title kiri
+        # =====================================================
+        # TITLE
+        # =====================================================
+
         self.put_text(
             canvas,
             "AI POWERED SMART BARRIER GATE",
-            (145, 58),
-            scale=1.35,
+            (
+                max(
+                    40,
+                    int(self.width * 0.11)
+                ),
+                int(self.top_height * 0.68)
+            ),
+            scale=1.45,
             color=self.yellow,
             thickness=3
         )
 
-        # Status tengah atas
-        status_x = int(self.width * 0.49)
+        # =====================================================
+        # RIGHT INFORMATION
+        # =====================================================
 
-        self.put_text(
-            canvas,
-            "OUT ZONE",
-            (status_x, 28),
-            scale=0.70,
-            color=self.yellow,
-            thickness=2
+        info_x = (
+            self.width
+            - 220
         )
-
-        self.put_text(
-            canvas,
-            gate_logic["line1"],
-            (status_x, 52),
-            scale=0.65,
-            color=gate_logic["line1_color"],
-            thickness=2
-        )
-
-        self.put_text(
-            canvas,
-            gate_logic["line2"],
-            (status_x, 76),
-            scale=0.65,
-            color=gate_logic["line2_color"],
-            thickness=2
-        )
-
-        # Info kanan atas
-        info_x = self.width - 190
 
         self.put_text(
             canvas,
             f"MAX DISTANCE {self.max_distance:.1f} M",
-            (info_x, 24),
-            scale=0.62,
+            (
+                info_x,
+                35
+            ),
+            scale=0.68,
             color=self.yellow,
             thickness=2
         )
@@ -161,8 +187,11 @@ class BarrierGateUI:
         self.put_text(
             canvas,
             f"YOLO {inference_ms:.0f}MS",
-            (info_x, 50),
-            scale=0.62,
+            (
+                info_x,
+                62
+            ),
+            scale=0.68,
             color=self.yellow,
             thickness=2
         )
@@ -170,277 +199,569 @@ class BarrierGateUI:
         self.put_text(
             canvas,
             f"FPS {fps:.1f}",
-            (info_x, 76),
-            scale=0.62,
+            (
+                info_x,
+                89
+            ),
+            scale=0.68,
             color=self.yellow,
             thickness=2
         )
 
     # =========================================================
-    # ROI POLYGON
+    # ZONE LOGIC
     # =========================================================
-    def get_roi_polygon(self, frame_w, frame_h):
-        """
-        Polygon pink / ungu seperti contoh Anda.
-        """
-        pts = np.array(
-            [
-                (int(frame_w * 0.32), int(frame_h * 0.40)),
-                (int(frame_w * 0.58), int(frame_h * 0.16)),
-                (int(frame_w * 0.90), int(frame_h * 0.58)),
-                (int(frame_w * 0.57), int(frame_h * 1.03)),
-            ],
-            dtype=np.int32
-        )
-        return pts
 
-    def draw_roi_polygon(self, frame, pts):
-        cv2.polylines(
-            frame,
-            [pts],
-            isClosed=True,
-            color=self.pink,
-            thickness=6
-        )
-
-    # =========================================================
-    # CHECK POINT INSIDE ROI
-    # =========================================================
-    def is_detection_inside_roi(
+    def get_zone_logic(
         self,
-        x1,
-        y1,
-        x2,
-        y2,
-        roi_pts
-    ):
-        """
-        Penilaian diambil dari center point box.
-        """
-        center_x = int((x1 + x2) / 2)
-        center_y = int((y1 + y2) / 2)
-
-        result = cv2.pointPolygonTest(
-            roi_pts,
-            (center_x, center_y),
-            False
-        )
-
-        return result >= 0, center_x, center_y
-
-    # =========================================================
-    # GATE LOGIC
-    # =========================================================
-    def get_gate_logic(
-        self,
-        roi_objects,
+        objects,
         validated=False
     ):
-        if not roi_objects:
+
+        # =====================================================
+        # NO OBJECT
+        # =====================================================
+
+        if not objects:
+
             return {
                 "line1": "-",
                 "line2": "-",
-                "line1_color": self.red,
-                "line2_color": self.red,
-                "gate_state": "standby"
+
+                "line1_color":
+                    self.red,
+
+                "line2_color":
+                    self.red,
+
+                "gate_state":
+                    "standby"
             }
+
+        names = [
+            obj["name"]
+            for obj in objects
+        ]
 
         loaded_name = None
         empty_name = None
 
-        for obj in roi_objects:
-            name = obj["name"]
-            if name in ["forklift_loaded", "troli_loaded"]:
+        # =====================================================
+        # SEARCH LOADED FIRST
+        # =====================================================
+
+        for name in names:
+
+            if name in (
+                "forklift_loaded",
+                "troli_loaded"
+            ):
+
                 loaded_name = name
                 break
 
-        for obj in roi_objects:
-            name = obj["name"]
-            if name in ["forklift_empty", "troli_empty"]:
+        # =====================================================
+        # SEARCH EMPTY
+        # =====================================================
+
+        for name in names:
+
+            if name in (
+                "forklift_empty",
+                "troli_empty"
+            ):
+
                 empty_name = name
                 break
 
-        # -----------------------------------------------------
+        # =====================================================
         # LOADED
-        # -----------------------------------------------------
+        # =====================================================
+
         if loaded_name is not None:
 
-            if loaded_name == "forklift_loaded":
-                line1 = "FORKLIFT TERDETEKSI (ADA MUATAN)"
+            if (
+                loaded_name
+                == "forklift_loaded"
+            ):
+
+                line1 = (
+                    "FORKLIFT TERDETEKSI "
+                    "(ADA MUATAN)"
+                )
+
             else:
-                line1 = "TROLI TERDETEKSI (ADA MUATAN)"
+
+                line1 = (
+                    "TROLI TERDETEKSI "
+                    "(ADA MUATAN)"
+                )
+
+            # =============================================
+            # VALIDATED
+            # =============================================
 
             if validated:
+
                 return {
-                    "line1": line1,
-                    "line2": "VALIDATE OK",
-                    "line1_color": self.green,
-                    "line2_color": self.green,
-                    "gate_state": "open"
+                    "line1":
+                        line1,
+
+                    "line2":
+                        "VALIDATE OK",
+
+                    "line1_color":
+                        self.green,
+
+                    "line2_color":
+                        self.green,
+
+                    "gate_state":
+                        "open"
                 }
 
+            # =============================================
+            # NOT VALIDATED
+            # =============================================
+
             return {
-                "line1": line1,
-                "line2": "LAKUKAN VALIDATE UNTUK MEMBUKA PORTAL",
-                "line1_color": self.green,
-                "line2_color": self.red,
-                "gate_state": "lock"
+                "line1":
+                    line1,
+
+                "line2":
+                    "LAKUKAN VALIDATE "
+                    "UNTUK MEMBUKA PORTAL",
+
+                "line1_color":
+                    self.green,
+
+                "line2_color":
+                    self.red,
+
+                "gate_state":
+                    "lock"
             }
 
-        # -----------------------------------------------------
+        # =====================================================
         # EMPTY
-        # -----------------------------------------------------
+        # =====================================================
+
         if empty_name is not None:
 
-            if empty_name == "forklift_empty":
-                line1 = "FORKLIFT TERDETEKSI (TIDAK ADA MUATAN)"
+            if (
+                empty_name
+                == "forklift_empty"
+            ):
+
+                line1 = (
+                    "FORKLIFT TERDETEKSI "
+                    "(TIDAK ADA MUATAN)"
+                )
+
             else:
-                line1 = "TROLI TERDETEKSI (TIDAK ADA MUATAN)"
+
+                line1 = (
+                    "TROLI TERDETEKSI "
+                    "(TIDAK ADA MUATAN)"
+                )
 
             return {
-                "line1": line1,
-                "line2": "AKAN TERBUKA DALAM 5 DETIK",
-                "line1_color": self.yellow,
-                "line2_color": self.yellow,
-                "gate_state": "countdown"
+                "line1":
+                    line1,
+
+                "line2":
+                    "-",
+
+                "line1_color":
+                    self.yellow,
+
+                "line2_color":
+                    self.red,
+
+                "gate_state":
+                    "countdown"
             }
+
+        # =====================================================
+        # UNKNOWN
+        # =====================================================
 
         return {
             "line1": "-",
             "line2": "-",
-            "line1_color": self.red,
-            "line2_color": self.red,
-            "gate_state": "standby"
+
+            "line1_color":
+                self.red,
+
+            "line2_color":
+                self.red,
+
+            "gate_state":
+                "standby"
         }
 
     # =========================================================
-    # GATE BAR
+    # DRAW ZONE
     # =========================================================
-    def get_gate_bar_style(self, gate_state):
 
-        if gate_state == "open":
-            return self.green, "OPEN"
+    def draw_zone_panel(
+        self,
+        canvas,
+        x1,
+        y1,
+        x2,
+        y2,
+        title,
+        zone_frame,
+        logic
+    ):
 
-        if gate_state == "lock":
-            return self.red, "LOCK"
+        # =====================================================
+        # PINK BORDER
+        # =====================================================
 
-        if gate_state == "countdown":
-            return self.yellow, "TERBUKA DALAM 5 DETIK"
+        cv2.rectangle(
+            canvas,
+            (
+                x1,
+                y1
+            ),
+            (
+                x2,
+                y2
+            ),
+            self.pink,
+            self.zone_border
+        )
 
-        return self.gray, "STANDBY"
+        # =====================================================
+        # INFO PANEL
+        # =====================================================
 
-    def draw_bottom_gate_status(self, canvas, gate_logic):
-        bar_y1 = self.height - self.bottom_height
-        bar_y2 = self.height
-
-        color, text = self.get_gate_bar_style(
-            gate_logic["gate_state"]
+        info_y2 = (
+            y1
+            + self.info_bar_height
         )
 
         cv2.rectangle(
             canvas,
-            (0, bar_y1),
-            (self.width, bar_y2),
-            color,
+            (
+                x1 + self.zone_border,
+                y1 + self.zone_border
+            ),
+            (
+                x2 - self.zone_border,
+                info_y2
+            ),
+            self.panel_gray,
+            -1
+        )
+
+        # =====================================================
+        # CAMERA AREA
+        # =====================================================
+
+        frame_x1 = (
+            x1
+            + self.zone_border
+        )
+
+        frame_x2 = (
+            x2
+            - self.zone_border
+        )
+
+        frame_y1 = (
+            info_y2
+        )
+
+        frame_y2 = (
+            y2
+            - self.zone_border
+        )
+
+        frame_width = (
+            frame_x2
+            - frame_x1
+        )
+
+        frame_height = (
+            frame_y2
+            - frame_y1
+        )
+
+        if (
+            frame_width > 0
+            and frame_height > 0
+        ):
+
+            resized = cv2.resize(
+                zone_frame,
+                (
+                    frame_width,
+                    frame_height
+                ),
+                interpolation=cv2.INTER_LINEAR
+            )
+
+            canvas[
+                frame_y1:frame_y2,
+                frame_x1:frame_x2
+            ] = resized
+
+        # =====================================================
+        # INFO PANEL REPAINT
+        # =====================================================
+
+        cv2.rectangle(
+            canvas,
+            (
+                x1 + self.zone_border,
+                y1 + self.zone_border
+            ),
+            (
+                x2 - self.zone_border,
+                info_y2
+            ),
+            self.panel_gray,
+            -1
+        )
+
+        # =====================================================
+        # ZONE TITLE
+        # =====================================================
+
+        self.put_text(
+            canvas,
+            title,
+            (
+                x1 + 20,
+                y1 + 38
+            ),
+            scale=0.78,
+            color=self.yellow,
+            thickness=2
+        )
+
+        # =====================================================
+        # STATUS LINE 1
+        # =====================================================
+
+        self.put_text(
+            canvas,
+            logic["line1"],
+            (
+                x1 + 20,
+                y1 + 68
+            ),
+            scale=0.68,
+            color=logic[
+                "line1_color"
+            ],
+            thickness=2
+        )
+
+        # =====================================================
+        # STATUS LINE 2
+        # =====================================================
+
+        self.put_text(
+            canvas,
+            logic["line2"],
+            (
+                x1 + 20,
+                y1 + 93
+            ),
+            scale=0.64,
+            color=logic[
+                "line2_color"
+            ],
+            thickness=2
+        )
+
+    # =========================================================
+    # GET BOTTOM BAR STYLE
+    # =========================================================
+
+    def get_bottom_bar_style(
+        self,
+        state
+    ):
+
+        # =====================================================
+        # OPEN
+        # =====================================================
+
+        if state == "open":
+
+            return (
+                self.green,
+                "OPEN"
+            )
+
+        # =====================================================
+        # LOCK
+        # =====================================================
+
+        if state == "lock":
+
+            return (
+                self.red,
+                "LOCK"
+            )
+
+        # =====================================================
+        # EMPTY COUNTDOWN
+        # =====================================================
+
+        if state == "countdown":
+
+            return (
+                self.yellow,
+                "TERBUKA DALAM 5 DETIK"
+            )
+
+        # =====================================================
+        # DEFAULT
+        # =====================================================
+
+        return (
+            self.gray,
+            "STANDBY"
+        )
+
+    # =========================================================
+    # DRAW BOTTOM STATUS
+    # =========================================================
+
+    def draw_bottom_status(
+        self,
+        canvas,
+        left_logic,
+        right_logic
+    ):
+
+        bar_y1 = (
+            self.height
+            - self.bottom_height
+            - self.outer_margin
+        )
+
+        bar_y2 = (
+            self.height
+            - self.outer_margin
+        )
+
+        available_width = (
+            self.width
+            - (self.outer_margin * 2)
+            - self.zone_gap
+        )
+
+        half_width = (
+            available_width
+            // 2
+        )
+
+        # =====================================================
+        # LEFT
+        # =====================================================
+
+        left_x1 = (
+            self.outer_margin
+        )
+
+        left_x2 = (
+            left_x1
+            + half_width
+        )
+
+        left_color, left_text = (
+            self.get_bottom_bar_style(
+                left_logic[
+                    "gate_state"
+                ]
+            )
+        )
+
+        cv2.rectangle(
+            canvas,
+            (
+                left_x1,
+                bar_y1
+            ),
+            (
+                left_x2,
+                bar_y2
+            ),
+            left_color,
             -1
         )
 
         self.put_center_text(
             canvas,
-            text,
-            0,
+            left_text,
+            left_x1,
             bar_y1,
-            self.width,
+            left_x2,
             bar_y2,
-            scale=1.0,
+            scale=0.90,
+            color=self.black,
+            thickness=2
+        )
+
+        # =====================================================
+        # RIGHT
+        # =====================================================
+
+        right_x1 = (
+            left_x2
+            + self.zone_gap
+        )
+
+        right_x2 = (
+            self.width
+            - self.outer_margin
+        )
+
+        right_color, right_text = (
+            self.get_bottom_bar_style(
+                right_logic[
+                    "gate_state"
+                ]
+            )
+        )
+
+        cv2.rectangle(
+            canvas,
+            (
+                right_x1,
+                bar_y1
+            ),
+            (
+                right_x2,
+                bar_y2
+            ),
+            right_color,
+            -1
+        )
+
+        self.put_center_text(
+            canvas,
+            right_text,
+            right_x1,
+            bar_y1,
+            right_x2,
+            bar_y2,
+            scale=0.90,
             color=self.black,
             thickness=2
         )
 
     # =========================================================
-    # DRAW DETECTIONS
-    # =========================================================
-    def draw_detections(
-        self,
-        frame,
-        detections,
-        roi_pts
-    ):
-        """
-        Return:
-        - frame yang sudah digambar
-        - list object yang valid di dalam ROI
-        """
-
-        roi_objects = []
-
-        for obj in detections:
-
-            x1 = int(obj["x1"])
-            y1 = int(obj["y1"])
-            x2 = int(obj["x2"])
-            y2 = int(obj["y2"])
-
-            name = obj["name"]
-            conf = obj["confidence"]
-
-            inside_roi, cx, cy = self.is_detection_inside_roi(
-                x1, y1, x2, y2, roi_pts
-            )
-
-            # Hanya yang di dalam ROI yang dipakai untuk penilaian
-            if inside_roi:
-                roi_objects.append(obj)
-
-                if "loaded" in name:
-                    color = self.green
-                else:
-                    color = self.yellow
-
-                cv2.rectangle(
-                    frame,
-                    (x1, y1),
-                    (x2, y2),
-                    color,
-                    2
-                )
-
-                label = f"{name} {conf:.2f}"
-
-                self.put_text(
-                    frame,
-                    label,
-                    (x1, max(00, y1 - 8)),
-                    scale=0.50,
-                    color=color,
-                    thickness=2
-                )
-
-                # titik center
-                cv2.circle(
-                    frame,
-                    (cx, cy),
-                    5,
-                    color,
-                    -1
-                )
-
-            else:
-                # Object di luar ROI diabaikan untuk gate
-                # Kalau mau tetap ditampilkan, pakai warna abu-abu tipis
-                cv2.rectangle(
-                    frame,
-                    (x1, y1),
-                    (x2, y2),
-                    (120, 120, 120),
-                    1
-                )
-
-        return frame, roi_objects
-
-    # =========================================================
     # RENDER
     # =========================================================
+
     def render(
         self,
         frame,
@@ -450,84 +771,442 @@ class BarrierGateUI:
         validate_left=False,
         validate_right=False
     ):
-        """
-        validate_right dipakai sebagai validate gate utama.
-        """
+
+        # =====================================================
+        # CANVAS
+        # =====================================================
 
         canvas = np.zeros(
-            (self.height, self.width, 3),
+            (
+                self.height,
+                self.width,
+                3
+            ),
             dtype=np.uint8
         )
-        canvas[:] = self.bg_black
 
-        # Area kamera
-        cam_y1 = self.top_height
-        cam_y2 = self.height - self.bottom_height
-        cam_h = cam_y2 - cam_y1
-        cam_w = self.width
-
-        display_frame = cv2.resize(
-            frame,
-            (cam_w, cam_h),
-            interpolation=cv2.INTER_LINEAR
+        canvas[:] = (
+            self.bg_black
         )
 
-        # Scale detections ke frame display
-        original_h, original_w = frame.shape[:2]
-        scale_x = cam_w / original_w
-        scale_y = cam_h / original_h
+        # =====================================================
+        # HEADER
+        # =====================================================
 
-        scaled_detections = []
-
-        for obj in detections:
-            scaled_detections.append(
-                {
-                    "name": obj["name"],
-                    "confidence": obj["confidence"],
-                    "x1": int(obj["x1"] * scale_x),
-                    "y1": int(obj["y1"] * scale_y),
-                    "x2": int(obj["x2"] * scale_x),
-                    "y2": int(obj["y2"] * scale_y),
-                }
-            )
-
-        # ROI polygon
-        roi_pts = self.get_roi_polygon(cam_w, cam_h)
-
-        # Draw detections and collect only inside ROI
-        display_frame, roi_objects = self.draw_detections(
-            display_frame,
-            scaled_detections,
-            roi_pts
-        )
-
-        # Draw ROI
-        self.draw_roi_polygon(
-            display_frame,
-            roi_pts
-        )
-
-        # Gate logic berdasarkan object di ROI saja
-        gate_logic = self.get_gate_logic(
-            roi_objects,
-            validated=validate_right
-        )
-
-        # Pasang frame ke canvas
-        canvas[cam_y1:cam_y2, 0:self.width] = display_frame
-
-        # Header
         self.draw_header(
             canvas,
             fps,
-            inference_ms,
-            gate_logic
+            inference_ms
         )
 
-        # Bottom gate status
-        self.draw_bottom_gate_status(
+        # =====================================================
+        # ZONE DIMENSIONS
+        # =====================================================
+
+        zone_y1 = (
+            self.top_height
+            + 6
+        )
+
+        zone_y2 = (
+            self.height
+            - self.bottom_height
+            - (self.outer_margin * 2)
+        )
+
+        available_width = (
+            self.width
+            - (self.outer_margin * 2)
+            - self.zone_gap
+        )
+
+        zone_width = (
+            available_width
+            // 2
+        )
+
+        # =====================================================
+        # LEFT POSITION
+        # =====================================================
+
+        left_x1 = (
+            self.outer_margin
+        )
+
+        left_x2 = (
+            left_x1
+            + zone_width
+        )
+
+        # =====================================================
+        # RIGHT POSITION
+        # =====================================================
+
+        right_x1 = (
+            left_x2
+            + self.zone_gap
+        )
+
+        right_x2 = (
+            self.width
+            - self.outer_margin
+        )
+
+        # =====================================================
+        # CAMERA DISPLAY SIZE
+        # =====================================================
+
+        camera_height = (
+            zone_y2
+            - zone_y1
+            - self.info_bar_height
+            - self.zone_border
+        )
+
+        camera_height = max(
+            camera_height,
+            1
+        )
+
+        # =====================================================
+        # ORIGINAL FRAME SIZE
+        # =====================================================
+
+        original_h, original_w = (
+            frame.shape[:2]
+        )
+
+        # =====================================================
+        # RESIZE FULL FRAME
+        # =====================================================
+
+        target_width = (
+            zone_width
+            * 2
+        )
+
+        display_frame = cv2.resize(
+            frame,
+            (
+                target_width,
+                camera_height
+            ),
+            interpolation=cv2.INTER_LINEAR
+        )
+
+        # =====================================================
+        # SPLIT
+        # =====================================================
+
+        left_frame = (
+            display_frame[
+                :,
+                :zone_width
+            ]
+            .copy()
+        )
+
+        right_frame = (
+            display_frame[
+                :,
+                zone_width:
+            ]
+            .copy()
+        )
+
+        # =====================================================
+        # DETECTION OBJECT LIST
+        # =====================================================
+
+        left_objects = []
+        right_objects = []
+
+        scale_x = (
+            target_width
+            / original_w
+        )
+
+        scale_y = (
+            camera_height
+            / original_h
+        )
+
+        # =====================================================
+        # DRAW DETECTIONS
+        # =====================================================
+
+        for obj in detections:
+
+            x1 = int(
+                obj["x1"]
+                * scale_x
+            )
+
+            y1 = int(
+                obj["y1"]
+                * scale_y
+            )
+
+            x2 = int(
+                obj["x2"]
+                * scale_x
+            )
+
+            y2 = int(
+                obj["y2"]
+                * scale_y
+            )
+
+            center_x = (
+                (x1 + x2)
+                // 2
+            )
+
+            name = (
+                obj["name"]
+            )
+
+            confidence = (
+                obj["confidence"]
+            )
+
+            label = (
+                f"{name} "
+                f"{confidence:.2f}"
+            )
+
+            # =================================================
+            # BOX COLOR
+            # =================================================
+
+            if "loaded" in name:
+
+                color = (
+                    self.green
+                )
+
+            else:
+
+                color = (
+                    self.yellow
+                )
+
+            # =================================================
+            # LEFT ZONE
+            # =================================================
+
+            if (
+                center_x
+                < zone_width
+            ):
+
+                left_objects.append(
+                    obj
+                )
+
+                # Clip coordinates
+                lx1 = max(
+                    0,
+                    min(
+                        zone_width - 1,
+                        x1
+                    )
+                )
+
+                lx2 = max(
+                    0,
+                    min(
+                        zone_width - 1,
+                        x2
+                    )
+                )
+
+                ly1 = max(
+                    0,
+                    min(
+                        camera_height - 1,
+                        y1
+                    )
+                )
+
+                ly2 = max(
+                    0,
+                    min(
+                        camera_height - 1,
+                        y2
+                    )
+                )
+
+                cv2.rectangle(
+                    left_frame,
+                    (
+                        lx1,
+                        ly1
+                    ),
+                    (
+                        lx2,
+                        ly2
+                    ),
+                    color,
+                    2
+                )
+
+                self.put_text(
+                    left_frame,
+                    label,
+                    (
+                        lx1,
+                        max(
+                            20,
+                            ly1 - 8
+                        )
+                    ),
+                    scale=0.45,
+                    color=color,
+                    thickness=2
+                )
+
+            # =================================================
+            # RIGHT ZONE
+            # =================================================
+
+            else:
+
+                right_objects.append(
+                    obj
+                )
+
+                rx1 = (
+                    x1
+                    - zone_width
+                )
+
+                rx2 = (
+                    x2
+                    - zone_width
+                )
+
+                rx1 = max(
+                    0,
+                    min(
+                        zone_width - 1,
+                        rx1
+                    )
+                )
+
+                rx2 = max(
+                    0,
+                    min(
+                        zone_width - 1,
+                        rx2
+                    )
+                )
+
+                ry1 = max(
+                    0,
+                    min(
+                        camera_height - 1,
+                        y1
+                    )
+                )
+
+                ry2 = max(
+                    0,
+                    min(
+                        camera_height - 1,
+                        y2
+                    )
+                )
+
+                cv2.rectangle(
+                    right_frame,
+                    (
+                        rx1,
+                        ry1
+                    ),
+                    (
+                        rx2,
+                        ry2
+                    ),
+                    color,
+                    2
+                )
+
+                self.put_text(
+                    right_frame,
+                    label,
+                    (
+                        rx1,
+                        max(
+                            20,
+                            ry1 - 8
+                        )
+                    ),
+                    scale=0.45,
+                    color=color,
+                    thickness=2
+                )
+
+        # =====================================================
+        # LEFT LOGIC
+        # =====================================================
+
+        left_logic = (
+            self.get_zone_logic(
+                left_objects,
+                validated=validate_left
+            )
+        )
+
+        # =====================================================
+        # RIGHT LOGIC
+        # =====================================================
+
+        right_logic = (
+            self.get_zone_logic(
+                right_objects,
+                validated=validate_right
+            )
+        )
+
+        # =====================================================
+        # DRAW LEFT ZONE
+        # =====================================================
+
+        self.draw_zone_panel(
             canvas,
-            gate_logic
+            left_x1,
+            zone_y1,
+            left_x2,
+            zone_y2,
+            "IN ZONE",
+            left_frame,
+            left_logic
+        )
+
+        # =====================================================
+        # DRAW RIGHT ZONE
+        # =====================================================
+
+        self.draw_zone_panel(
+            canvas,
+            right_x1,
+            zone_y1,
+            right_x2,
+            zone_y2,
+            "OUT ZONE",
+            right_frame,
+            right_logic
+        )
+
+        # =====================================================
+        # DRAW INDEPENDENT BOTTOM STATUS
+        # =====================================================
+
+        self.draw_bottom_status(
+            canvas,
+            left_logic,
+            right_logic
         )
 
         return canvas
