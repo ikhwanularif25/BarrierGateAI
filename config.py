@@ -40,7 +40,7 @@ IMAGE_SIZE = 416 #640
 # dasar auto-open, sedangkan LOADED harus cukup yakin sebelum dicatat.
 
 MIN_CONF_EMPTY = 0.55
-MIN_CONF_LOADED = 0.65
+MIN_CONF_LOADED = 0.60
 
 
 # =========================================================
