@@ -14,7 +14,7 @@ __pycache__/
 # Environment / secrets
 .env
 
-
+functional_test_snapshots/
 
 # Videos / CCTV recordings
 videos/*.mp4
