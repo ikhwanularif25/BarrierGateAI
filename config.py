@@ -171,3 +171,27 @@ TOP_BAR_HEIGHT = 100
 BOTTOM_PANEL_HEIGHT = 70
 
 MAX_DISTANCE = 5.0
+
+# =========================================================
+
+# NODE-RED
+
+# =========================================================
+
+
+
+NODE_RED_ENABLED = True
+
+
+
+NODE_RED_URL = (
+
+    "http://192.168.5.2:1880/"
+
+    "barrier-gate/detection"
+
+)
+
+
+
+NODE_RED_TIMEOUT = 3.0

@@ -16,16 +16,27 @@ from config import (
     TOP_BAR_HEIGHT,
     BOTTOM_PANEL_HEIGHT,
     MAX_DISTANCE,
+    NODE_RED_ENABLED,
+    NODE_RED_URL,
+    NODE_RED_TIMEOUT
 )
 from detector import Detector
 from functional_test_logger import FunctionalTestLogger
 from main import get_screen_resolution, open_camera
 from ui import BarrierGateUI
+from node_red_sender import NodeRedSender
+from datetime import datetime
 
 
 FUNCTION_TEST_WEBHOOK_URL = os.getenv("FUNCTION_TEST_WEBHOOK_URL", "")
 FUNCTION_TEST_COOLDOWN = float(os.getenv("FUNCTION_TEST_COOLDOWN", "10"))
 FUNCTION_TEST_SNAPSHOT_DIR = BASE_DIR / "functional_test_snapshots"
+
+if NODE_RED_ENABLED:
+    node_red_sender = NodeRedSender(
+        url=NODE_RED_URL,
+        timeout=NODE_RED_TIMEOUT
+    )
 
 TRACKED_CLASSES = {
     "forklift_loaded",
