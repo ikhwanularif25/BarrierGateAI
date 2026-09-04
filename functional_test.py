@@ -1,5 +1,6 @@
 import os
 import time
+from datetime import datetime
 
 import cv2
 import numpy as np
@@ -16,27 +17,22 @@ from config import (
     TOP_BAR_HEIGHT,
     BOTTOM_PANEL_HEIGHT,
     MAX_DISTANCE,
+    MIN_CONF_EMPTY,
+    MIN_CONF_LOADED,
     NODE_RED_ENABLED,
     NODE_RED_URL,
-    NODE_RED_TIMEOUT
+    NODE_RED_TIMEOUT,
 )
 from detector import Detector
 from functional_test_logger import FunctionalTestLogger
 from main import get_screen_resolution, open_camera
-from ui import BarrierGateUI
 from node_red_sender import NodeRedSender
-from datetime import datetime
+from ui import BarrierGateUI
 
 
 FUNCTION_TEST_WEBHOOK_URL = os.getenv("FUNCTION_TEST_WEBHOOK_URL", "")
 FUNCTION_TEST_COOLDOWN = float(os.getenv("FUNCTION_TEST_COOLDOWN", "10"))
 FUNCTION_TEST_SNAPSHOT_DIR = BASE_DIR / "functional_test_snapshots"
-
-if NODE_RED_ENABLED:
-    node_red_sender = NodeRedSender(
-        url=NODE_RED_URL,
-        timeout=NODE_RED_TIMEOUT
-    )
 
 TRACKED_CLASSES = {
     "forklift_loaded",
@@ -79,11 +75,37 @@ def convert_detections(result, detector):
     return detections
 
 
-def get_ui2_qualified_detections(ui, frame, detections):
-    """Gunakan persis rule UI2: center point box harus berada di polygon pink.
+def filter_detection_confidence(detections):
+    """Filter class-specific confidence sebelum UI/gate/logger/Node-RED."""
+    filtered = []
 
-    Tidak ada pembagian kiri/kanan dan tidak ada ROI tambahan dari test logger.
-    """
+    for obj in detections:
+        class_name = str(obj.get("name", "")).replace("empety", "empty")
+        confidence = float(obj.get("confidence", 0.0))
+
+        if class_name not in TRACKED_CLASSES:
+            continue
+
+        if class_name.endswith("_loaded"):
+            if confidence < MIN_CONF_LOADED:
+                continue
+
+        elif class_name.endswith("_empty"):
+            if confidence < MIN_CONF_EMPTY:
+                continue
+
+        else:
+            continue
+
+        obj_filtered = dict(obj)
+        obj_filtered["name"] = class_name
+        filtered.append(obj_filtered)
+
+    return filtered
+
+
+def get_ui2_qualified_detections(ui, frame, detections):
+    """Rule UI2: center point bounding box harus berada di polygon pink."""
     if frame is None or not detections:
         return []
 
@@ -99,11 +121,6 @@ def get_ui2_qualified_detections(ui, frame, detections):
     qualified = []
 
     for obj in detections:
-        class_name = str(obj["name"]).replace("empety", "empty")
-
-        if class_name not in TRACKED_CLASSES:
-            continue
-
         sx1 = int(obj["x1"] * scale_x)
         sy1 = int(obj["y1"] * scale_y)
         sx2 = int(obj["x2"] * scale_x)
@@ -123,6 +140,37 @@ def get_ui2_qualified_detections(ui, frame, detections):
     return qualified
 
 
+def build_node_red_payload(obj):
+    class_name = str(obj.get("name", "")).replace("empety", "empty")
+    confidence = float(obj.get("confidence", 0.0))
+
+    if class_name.startswith("forklift"):
+        object_type = "forklift"
+    elif class_name.startswith("troli"):
+        object_type = "troli"
+    else:
+        return None
+
+    if class_name.endswith("_loaded"):
+        load_status = "loaded"
+    elif class_name.endswith("_empty"):
+        load_status = "empty"
+    else:
+        return None
+
+    return {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "camera": f"CAM{CAMERA_NUMBER:03d}",
+        "zone": "OUT",
+        "object_type": object_type,
+        "load_status": load_status,
+        "class_name": class_name,
+        "confidence": round(confidence, 4),
+        "inside_roi": True,
+        "source": "BarrierGateAI",
+    }
+
+
 def main():
     print("=" * 70)
     print("BARRIER GATE AI - UI2 FUNCTIONAL TEST LOGGER")
@@ -132,9 +180,11 @@ def main():
     print("Model      :", MODEL_PATH)
     print("Image size :", IMAGE_SIZE)
     print("Confidence :", CONFIDENCE)
+    print("Min empty  :", MIN_CONF_EMPTY)
+    print("Min loaded :", MIN_CONF_LOADED)
     print("Cooldown   :", FUNCTION_TEST_COOLDOWN, "seconds")
     print("UI         : UI2 (unchanged)")
-    print("Log rule   : tracked class + center point inside UI2 pink ROI")
+    print("Log rule   : confidence + tracked class + center point inside UI2 pink ROI")
 
     mode = CAMERA_MODE.strip().lower()
     screen_width, screen_height = get_screen_resolution()
@@ -165,6 +215,17 @@ def main():
         cooldown_seconds=FUNCTION_TEST_COOLDOWN,
         camera_name=f"CAM{CAMERA_NUMBER:03d}",
     )
+
+    node_red_sender = None
+
+    if NODE_RED_ENABLED:
+        node_red_sender = NodeRedSender(
+            url=NODE_RED_URL,
+            timeout=NODE_RED_TIMEOUT,
+        )
+        print("Node-RED   : ENABLED ->", NODE_RED_URL)
+    else:
+        print("Node-RED   : DISABLED")
 
     validate_left = False
     validate_right = False
@@ -236,10 +297,13 @@ def main():
                 frame_timestamp = time.perf_counter()
 
             # =================================================
-            # YOLO - sama seperti UI2
+            # YOLO
             # =================================================
             result = detector.detect(frame)
-            detections = convert_detections(result, detector)
+            raw_detections = convert_detections(result, detector)
+
+            # Threshold class-specific dipakai untuk UI + gate + logger + Node-RED.
+            detections = filter_detection_confidence(raw_detections)
             detection_count = len(detections)
 
             inference_ms = 0.0
@@ -247,7 +311,7 @@ def main():
                 inference_ms = result.speed.get("inference", 0.0)
 
             # =================================================
-            # FPS - sama pola dengan main UI2
+            # FPS
             # =================================================
             current_time = time.perf_counter()
             delta = current_time - previous_time
@@ -280,6 +344,19 @@ def main():
                 detections,
             )
 
+            # =================================================
+            # NODE-RED JSON
+            # =================================================
+            if node_red_sender:
+                for obj in qualified:
+                    payload = build_node_red_payload(obj)
+
+                    if payload:
+                        node_red_sender.send(payload)
+
+            # =================================================
+            # SPREADSHEET / SNAPSHOT LOGGER
+            # =================================================
             new_logs = logger.process(
                 snapshot_frame=display,
                 qualified_detections=qualified,
@@ -288,7 +365,9 @@ def main():
             )
             total_logged += new_logs
 
-            # Overlay latency/detection count dipertahankan seperti main UI2.
+            # =================================================
+            # LATENCY
+            # =================================================
             if mode == "rtsp":
                 total_latency_ms = (
                     time.perf_counter() - frame_timestamp
@@ -364,6 +443,10 @@ def main():
         pass
     finally:
         print("Functional test logged events:", total_logged)
+
+        if node_red_sender:
+            node_red_sender.close()
+
         logger.close()
         camera.release()
         cv2.destroyAllWindows()
