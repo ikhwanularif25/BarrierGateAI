@@ -195,6 +195,8 @@ def main():
         image_size=IMAGE_SIZE,
     )
 
+    print("MODEL CLASSES:", detector.model.names)
+
     scale_y = screen_height / 1080.0
     top_height = max(80, int(TOP_BAR_HEIGHT * scale_y))
     bottom_height = max(55, int(BOTTOM_PANEL_HEIGHT * scale_y))
@@ -301,6 +303,13 @@ def main():
             # =================================================
             result = detector.detect(frame)
             raw_detections = convert_detections(result, detector)
+
+            for obj in raw_detections:
+                print(
+                    "[RAW DET]",
+                    obj["name"],
+                    f'{float(obj["confidence"]):.2f}'
+                )
 
             # Threshold class-specific dipakai untuk UI + gate + logger + Node-RED.
             detections = filter_detection_confidence(raw_detections)
