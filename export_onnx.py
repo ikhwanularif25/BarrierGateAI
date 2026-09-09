@@ -1,7 +1,7 @@
 from ultralytics import YOLO
 
 # 1. Load model yang sudah selesai di-training
-model = YOLO("models/best3.pt")  # ganti dengan lokasi file best.pt kamu
+model = YOLO("models/best4.pt")  # ganti dengan lokasi file best.pt kamu
 
 # 2. Export ke format ONNX
 model.export(
