@@ -26,7 +26,7 @@ VERSION = "1.0.1"
 # MODEL
 # =========================================================
 
-MODEL_PATH = BASE_DIR / "models" / "best2.pt"
+MODEL_PATH = BASE_DIR / "models" / "best3.onnx"
 
 # Global YOLO threshold. Detection di bawah nilai ini tidak dikeluarkan model.
 CONFIDENCE = 0.35
