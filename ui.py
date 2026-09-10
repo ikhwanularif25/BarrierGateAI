@@ -172,7 +172,7 @@ class BarrierGateUI:
         )
 
     def get_roi_polygon(self, frame_w, frame_h):
-        pts = np.array(
+        return np.array(
             [
                 (int(frame_w * 0.32), int(frame_h * 0.40)),
                 (int(frame_w * 0.58), int(frame_h * 0.16)),
@@ -181,7 +181,6 @@ class BarrierGateUI:
             ],
             dtype=np.int32
         )
-        return pts
 
     def draw_roi_polygon(self, frame, pts):
         cv2.polylines(
@@ -325,72 +324,119 @@ class BarrierGateUI:
             thickness=2
         )
 
-    def draw_detections(
+    def _raw_detection_color(self, name, inside_roi):
+        """Raw model detections remain visible both inside and outside ROI."""
+        if not inside_roi:
+            return self.gray
+
+        if name == "forklift":
+            return self.green
+
+        if name in {"trolley", "troli"}:
+            return self.yellow
+
+        if name == "object":
+            return self.white
+
+        return self.white
+
+    def draw_raw_detections(
         self,
         frame,
         detections,
         roi_pts
     ):
-        roi_objects = []
+        """
+        Draw every raw best4 model detection.
 
+        IMPORTANT:
+        ROI only changes visual emphasis. Detections outside ROI are still
+        displayed so the operator can see the complete model reading.
+        """
         for obj in detections:
             x1 = int(obj["x1"])
             y1 = int(obj["y1"])
             x2 = int(obj["x2"])
             y2 = int(obj["y2"])
 
-            name = obj["name"]
-            conf = obj["confidence"]
+            name = str(obj.get("name", "")).strip().lower()
+            conf = float(obj.get("confidence", 0.0))
 
             inside_roi, cx, cy = self.is_detection_inside_roi(
-                x1, y1, x2, y2, roi_pts
+                x1,
+                y1,
+                x2,
+                y2,
+                roi_pts
+            )
+
+            color = self._raw_detection_color(name, inside_roi)
+            thickness = 3 if inside_roi else 1
+
+            cv2.rectangle(
+                frame,
+                (x1, y1),
+                (x2, y2),
+                color,
+                thickness
+            )
+
+            roi_flag = "ROI" if inside_roi else "OUT"
+            label = f"{name} {conf:.2f} [{roi_flag}]"
+
+            self.put_text(
+                frame,
+                label,
+                (x1, max(18, y1 - 8)),
+                scale=0.50,
+                color=color,
+                thickness=2 if inside_roi else 1
+            )
+
+            cv2.circle(
+                frame,
+                (cx, cy),
+                5 if inside_roi else 3,
+                color,
+                -1
+            )
+
+        return frame
+
+    def get_roi_objects(
+        self,
+        detections,
+        roi_pts
+    ):
+        """Return only decision detections whose center point is inside ROI."""
+        roi_objects = []
+
+        for obj in detections:
+            inside_roi, _, _ = self.is_detection_inside_roi(
+                int(obj["x1"]),
+                int(obj["y1"]),
+                int(obj["x2"]),
+                int(obj["y2"]),
+                roi_pts
             )
 
             if inside_roi:
                 roi_objects.append(obj)
 
-                if "loaded" in name:
-                    color = self.green
-                else:
-                    color = self.yellow
+        return roi_objects
 
-                cv2.rectangle(
-                    frame,
-                    (x1, y1),
-                    (x2, y2),
-                    color,
-                    2
-                )
+    def _scale_detections(self, detections, scale_x, scale_y):
+        scaled = []
 
-                label = f"{name} {conf:.2f}"
+        for obj in detections:
+            item = dict(obj)
+            item["x1"] = int(obj["x1"] * scale_x)
+            item["y1"] = int(obj["y1"] * scale_y)
+            item["x2"] = int(obj["x2"] * scale_x)
+            item["y2"] = int(obj["y2"] * scale_y)
+            scaled.append(item)
 
-                self.put_text(
-                    frame,
-                    label,
-                    (x1, max(0, y1 - 8)),
-                    scale=0.50,
-                    color=color,
-                    thickness=2
-                )
-
-                cv2.circle(
-                    frame,
-                    (cx, cy),
-                    5,
-                    color,
-                    -1
-                )
-
-            else:
-                cv2.rectangle(
-                    frame,
-                    (x1, y1),
-                    (x2, y2),
-                    (120, 120, 120),
-                    1
-                )
-
-        return frame, roi_objects
+        return scaled
 
     def render(
         self,
@@ -399,21 +445,29 @@ class BarrierGateUI:
         fps,
         inference_ms,
         validate_left=False,
-        validate_right=False
+        validate_right=False,
+        decision_detections=None
     ):
         """
-        Accepts either legacy detections or raw best4 detections.
-        Raw best4 detections are adapted here so main.py keeps the old UI output.
+        `detections` is the raw best4 model output and is ALWAYS displayed.
+
+        `decision_detections` is the legacy loaded/empty result used only for
+        gate state. Only decision detections whose center point is inside the
+        pink ROI can influence the gate.
+
+        For main.py compatibility, when decision_detections is omitted the
+        raw detections are adapted here automatically.
         """
-        detections = adapt_best4_detections(
-            detections,
-            min_vehicle_conf=MIN_CONF_VEHICLE,
-            min_object_conf=MIN_CONF_OBJECT,
-            expand_x=LOAD_ASSOCIATION_EXPAND_X,
-            expand_top=LOAD_ASSOCIATION_EXPAND_TOP,
-            expand_bottom=LOAD_ASSOCIATION_EXPAND_BOTTOM,
-            min_object_overlap=LOAD_ASSOCIATION_MIN_OBJECT_OVERLAP,
-        )
+        if decision_detections is None:
+            decision_detections = adapt_best4_detections(
+                detections,
+                min_vehicle_conf=MIN_CONF_VEHICLE,
+                min_object_conf=MIN_CONF_OBJECT,
+                expand_x=LOAD_ASSOCIATION_EXPAND_X,
+                expand_top=LOAD_ASSOCIATION_EXPAND_TOP,
+                expand_bottom=LOAD_ASSOCIATION_EXPAND_BOTTOM,
+                min_object_overlap=LOAD_ASSOCIATION_MIN_OBJECT_OVERLAP,
+            )
 
         canvas = np.zeros(
             (self.height, self.width, 3),
@@ -436,30 +490,35 @@ class BarrierGateUI:
         scale_x = cam_w / original_w
         scale_y = cam_h / original_h
 
-        scaled_detections = []
+        scaled_raw = self._scale_detections(
+            detections,
+            scale_x,
+            scale_y
+        )
 
-        for obj in detections:
-            scaled_detections.append(
-                {
-                    "name": obj["name"],
-                    "confidence": obj["confidence"],
-                    "x1": int(obj["x1"] * scale_x),
-                    "y1": int(obj["y1"] * scale_y),
-                    "x2": int(obj["x2"] * scale_x),
-                    "y2": int(obj["y2"] * scale_y),
-                }
-            )
+        scaled_decisions = self._scale_detections(
+            decision_detections,
+            scale_x,
+            scale_y
+        )
 
         roi_pts = self.get_roi_polygon(cam_w, cam_h)
 
-        display_frame, roi_objects = self.draw_detections(
+        # Display every raw best4 reading, including detections outside ROI.
+        display_frame = self.draw_raw_detections(
             display_frame,
-            scaled_detections,
+            scaled_raw,
             roi_pts
         )
 
         self.draw_roi_polygon(
             display_frame,
+            roi_pts
+        )
+
+        # Gate state is determined ONLY by legacy decisions inside ROI.
+        roi_objects = self.get_roi_objects(
+            scaled_decisions,
             roi_pts
         )
 
