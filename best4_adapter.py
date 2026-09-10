@@ -1,20 +1,12 @@
 import math
 
 
-LEGACY_CLASSES = {
-    "forklift_loaded",
-    "forklift_empty",
-    "troli_loaded",
-    "troli_empty",
-}
+VEHICLE_CLASSES = {"forklift", "troli"}
 
 
 def normalize_class_name(name):
-    """Normalize model class names without changing the legacy output contract."""
     name = str(name or "").strip().lower()
-    name = name.replace("empety", "empty")
-    name = name.replace("trolley", "troli")
-    return name
+    return "troli" if name == "trolley" else name
 
 
 def _area(box):
@@ -34,10 +26,7 @@ def _center(box):
 
 
 def _contains(box, point):
-    return (
-        box[0] <= point[0] <= box[2]
-        and box[1] <= point[1] <= box[3]
-    )
+    return box[0] <= point[0] <= box[2] and box[1] <= point[1] <= box[3]
 
 
 def _expanded_vehicle_box(vehicle_box, expand_x, expand_top, expand_bottom):
@@ -61,7 +50,6 @@ def _association_score(
     expand_bottom,
     min_object_overlap,
 ):
-    """Return None when an object is not spatially related to a vehicle."""
     expanded = _expanded_vehicle_box(
         vehicle_box,
         expand_x,
@@ -80,9 +68,10 @@ def _association_score(
         return None
 
     vehicle_center = _center(vehicle_box)
-    dx = object_center[0] - vehicle_center[0]
-    dy = object_center[1] - vehicle_center[1]
-    distance = math.hypot(dx, dy)
+    distance = math.hypot(
+        object_center[0] - vehicle_center[0],
+        object_center[1] - vehicle_center[1],
+    )
 
     vehicle_w = max(1.0, vehicle_box[2] - vehicle_box[0])
     vehicle_h = max(1.0, vehicle_box[3] - vehicle_box[1])
@@ -109,59 +98,30 @@ def adapt_best4_detections(
     expand_bottom=0.15,
     min_object_overlap=0.10,
 ):
-    """
-    Convert best4 classes:
-        forklift, trolley/troli, object
+    """Convert best4 raw classes into the existing BarrierGate output contract.
 
-    into the legacy BarrierGateAI contract:
+    Input model classes:
+        forklift, trolley, object
+
+    Output classes:
         forklift_loaded, forklift_empty,
         troli_loaded, troli_empty
-
-    Rule:
-    - forklift/trolley is the primary vehicle detection.
-    - object is treated as load only when spatially associated with a vehicle.
-    - one object is assigned only to the best matching vehicle.
-    - vehicle without associated object becomes *_empty.
-    - vehicle with one or more associated objects becomes *_loaded.
-
-    If the input already contains legacy classes, they are returned normalized.
-    This keeps old models compatible with the same code path.
     """
     if not detections:
         return []
 
-    normalized = []
-    legacy_found = False
-
-    for obj in detections:
-        item = dict(obj)
-        item["name"] = normalize_class_name(item.get("name", ""))
-        normalized.append(item)
-
-        if item["name"] in LEGACY_CLASSES:
-            legacy_found = True
-
-    if legacy_found:
-        return [
-            item
-            for item in normalized
-            if item["name"] in LEGACY_CLASSES
-        ]
-
     vehicles = []
     cargo_objects = []
 
-    for item in normalized:
-        name = item["name"]
+    for raw in detections:
+        item = dict(raw)
+        item["name"] = normalize_class_name(item.get("name", ""))
         confidence = float(item.get("confidence", 0.0))
 
-        if name in {"forklift", "troli"} and confidence >= min_vehicle_conf:
+        if item["name"] in VEHICLE_CLASSES and confidence >= min_vehicle_conf:
             vehicles.append(item)
-        elif name == "object" and confidence >= min_object_conf:
+        elif item["name"] == "object" and confidence >= min_object_conf:
             cargo_objects.append(item)
-
-    if not vehicles:
-        return []
 
     assignments = {index: [] for index in range(len(vehicles))}
 
@@ -193,10 +153,7 @@ def adapt_best4_detections(
                 min_object_overlap,
             )
 
-            if score is None:
-                continue
-
-            if best_score is None or score > best_score:
+            if score is not None and (best_score is None or score > best_score):
                 best_score = score
                 best_vehicle_index = index
 
@@ -206,38 +163,28 @@ def adapt_best4_detections(
     derived = []
 
     for index, vehicle in enumerate(vehicles):
-        vehicle_type = vehicle["name"]
+        item = dict(vehicle)
         vehicle_conf = float(vehicle.get("confidence", 0.0))
         associated = assignments[index]
-
-        item = dict(vehicle)
 
         if associated:
             best_object_conf = max(
                 float(obj.get("confidence", 0.0))
                 for obj in associated
             )
-
-            # Geometric mean keeps the result conservative while avoiding
-            # over-penalizing one moderately lower component confidence.
-            derived_conf = math.sqrt(
-                max(0.0, vehicle_conf) * max(0.0, best_object_conf)
-            )
-
-            item["name"] = f"{vehicle_type}_loaded"
-            item["confidence"] = derived_conf
-            item["vehicle_confidence"] = vehicle_conf
+            item["name"] = f'{vehicle["name"]}_loaded'
+            item["confidence"] = math.sqrt(vehicle_conf * best_object_conf)
             item["object_confidence"] = best_object_conf
             item["associated_object_count"] = len(associated)
             item["load_inference"] = "spatial_association"
         else:
-            item["name"] = f"{vehicle_type}_empty"
+            item["name"] = f'{vehicle["name"]}_empty'
             item["confidence"] = vehicle_conf
-            item["vehicle_confidence"] = vehicle_conf
             item["object_confidence"] = None
             item["associated_object_count"] = 0
             item["load_inference"] = "no_associated_object"
 
+        item["vehicle_confidence"] = vehicle_conf
         derived.append(item)
 
     return derived
