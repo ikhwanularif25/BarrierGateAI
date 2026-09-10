@@ -19,10 +19,17 @@ from config import (
     MAX_DISTANCE,
     MIN_CONF_EMPTY,
     MIN_CONF_LOADED,
+    MIN_CONF_VEHICLE,
+    MIN_CONF_OBJECT,
+    LOAD_ASSOCIATION_EXPAND_X,
+    LOAD_ASSOCIATION_EXPAND_TOP,
+    LOAD_ASSOCIATION_EXPAND_BOTTOM,
+    LOAD_ASSOCIATION_MIN_OBJECT_OVERLAP,
     NODE_RED_ENABLED,
     NODE_RED_URL,
     NODE_RED_TIMEOUT,
 )
+from best4_adapter import adapt_best4_detections
 from detector import Detector
 from functional_test_logger import FunctionalTestLogger
 from main import get_screen_resolution, open_camera
@@ -43,6 +50,7 @@ TRACKED_CLASSES = {
 
 
 def convert_detections(result, detector):
+    """Convert raw Ultralytics boxes into simple dictionaries."""
     detections = []
 
     for box in result.boxes:
@@ -51,6 +59,8 @@ def convert_detections(result, detector):
         class_name = (
             detector.model.names[class_id]
             .replace("empety", "empty")
+            .strip()
+            .lower()
         )
 
         x1, y1, x2, y2 = (
@@ -75,8 +85,24 @@ def convert_detections(result, detector):
     return detections
 
 
+def derive_legacy_detections(raw_detections):
+    """
+    Adapt best4 raw classes (forklift/trolley/object) into the legacy
+    forklift_loaded/forklift_empty/troli_loaded/troli_empty contract.
+    """
+    return adapt_best4_detections(
+        raw_detections,
+        min_vehicle_conf=MIN_CONF_VEHICLE,
+        min_object_conf=MIN_CONF_OBJECT,
+        expand_x=LOAD_ASSOCIATION_EXPAND_X,
+        expand_top=LOAD_ASSOCIATION_EXPAND_TOP,
+        expand_bottom=LOAD_ASSOCIATION_EXPAND_BOTTOM,
+        min_object_overlap=LOAD_ASSOCIATION_MIN_OBJECT_OVERLAP,
+    )
+
+
 def filter_detection_confidence(detections):
-    """Filter class-specific confidence sebelum UI/gate/logger/Node-RED."""
+    """Filter legacy class-specific confidence before UI/gate/logger/Node-RED."""
     filtered = []
 
     for obj in detections:
@@ -141,6 +167,7 @@ def get_ui2_qualified_detections(ui, frame, detections):
 
 
 def build_node_red_payload(obj):
+    """Keep the Node-RED JSON contract identical to the previous branch."""
     class_name = str(obj.get("name", "")).replace("empety", "empty")
     confidence = float(obj.get("confidence", 0.0))
 
@@ -173,18 +200,24 @@ def build_node_red_payload(obj):
 
 def main():
     print("=" * 70)
-    print("BARRIER GATE AI - UI2 FUNCTIONAL TEST LOGGER")
+    print("BARRIER GATE AI - UI2 FUNCTIONAL TEST LOGGER - BEST4")
     print("=" * 70)
     print("Mode       :", CAMERA_MODE)
     print("Camera     :", f"CAM{CAMERA_NUMBER:03d}")
     print("Model      :", MODEL_PATH)
     print("Image size :", IMAGE_SIZE)
     print("Confidence :", CONFIDENCE)
+    print("Raw vehicle:", MIN_CONF_VEHICLE)
+    print("Raw object :", MIN_CONF_OBJECT)
     print("Min empty  :", MIN_CONF_EMPTY)
     print("Min loaded :", MIN_CONF_LOADED)
     print("Cooldown   :", FUNCTION_TEST_COOLDOWN, "seconds")
-    print("UI         : UI2 (unchanged)")
-    print("Log rule   : confidence + tracked class + center point inside UI2 pink ROI")
+    print("UI         : UI2 (legacy output unchanged)")
+    print(
+        "Load rule   : vehicle + spatially-associated object => loaded; "
+        "vehicle without associated object => empty"
+    )
+    print("Log rule   : confidence + legacy class + center point inside UI2 pink ROI")
 
     mode = CAMERA_MODE.strip().lower()
     screen_width, screen_height = get_screen_resolution()
@@ -271,6 +304,7 @@ def main():
     fps_smooth = 0.0
     last_frame_id = -1
     total_logged = 0
+    last_adapter_debug = 0.0
 
     try:
         while True:
@@ -299,20 +333,42 @@ def main():
                 frame_timestamp = time.perf_counter()
 
             # =================================================
-            # YOLO
+            # YOLO RAW: forklift / trolley / object
             # =================================================
             result = detector.detect(frame)
             raw_detections = convert_detections(result, detector)
 
-            for obj in raw_detections:
-                print(
-                    "[RAW DET]",
-                    obj["name"],
-                    f'{float(obj["confidence"]):.2f}'
-                )
+            # =================================================
+            # BEST4 ADAPTER -> LEGACY OUTPUT
+            # =================================================
+            derived_detections = derive_legacy_detections(raw_detections)
 
-            # Threshold class-specific dipakai untuk UI + gate + logger + Node-RED.
-            detections = filter_detection_confidence(raw_detections)
+            debug_now = time.perf_counter()
+            if debug_now - last_adapter_debug >= 0.5:
+                if raw_detections:
+                    raw_text = ", ".join(
+                        f'{obj["name"]} {float(obj["confidence"]):.2f}'
+                        for obj in raw_detections
+                    )
+                    print("[RAW DET]", raw_text)
+
+                if derived_detections:
+                    derived_parts = []
+                    for obj in derived_detections:
+                        text = (
+                            f'{obj["name"]} {float(obj["confidence"]):.2f}'
+                        )
+                        if obj.get("associated_object_count") is not None:
+                            text += (
+                                f' | cargo={obj.get("associated_object_count", 0)}'
+                            )
+                        derived_parts.append(text)
+                    print("[ADAPTED]", ", ".join(derived_parts))
+
+                last_adapter_debug = debug_now
+
+            # Threshold legacy dipakai untuk UI + gate + logger + Node-RED.
+            detections = filter_detection_confidence(derived_detections)
             detection_count = len(detections)
 
             inference_ms = 0.0
@@ -333,7 +389,7 @@ def main():
                 fps_smooth = (fps_smooth * 0.90) + (fps * 0.10)
 
             # =================================================
-            # RENDER UI2 ASLI
+            # RENDER UI2 - OUTPUT LEGACY TETAP SAMA
             # =================================================
             display = ui.render(
                 frame=frame,
@@ -354,7 +410,7 @@ def main():
             )
 
             # =================================================
-            # NODE-RED JSON
+            # NODE-RED JSON - CONTRACT TIDAK BERUBAH
             # =================================================
             if node_red_sender:
                 for obj in qualified:
@@ -369,7 +425,7 @@ def main():
             new_logs = logger.process(
                 snapshot_frame=display,
                 qualified_detections=qualified,
-                source="FUNCTIONAL_TEST_UI2",
+                source="FUNCTIONAL_TEST_UI2_BEST4",
                 zone="OUT",
             )
             total_logged += new_logs
