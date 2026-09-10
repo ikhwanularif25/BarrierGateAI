@@ -1,6 +1,16 @@
 import cv2
 import numpy as np
 
+from best4_adapter import adapt_best4_detections
+from config import (
+    MIN_CONF_VEHICLE,
+    MIN_CONF_OBJECT,
+    LOAD_ASSOCIATION_EXPAND_X,
+    LOAD_ASSOCIATION_EXPAND_TOP,
+    LOAD_ASSOCIATION_EXPAND_BOTTOM,
+    LOAD_ASSOCIATION_MIN_OBJECT_OVERLAP,
+)
+
 
 class BarrierGateUI:
 
@@ -18,25 +28,16 @@ class BarrierGateUI:
         self.bottom_height = bottom_height
         self.max_distance = max_distance
 
-        # =====================================================
-        # COLORS (BGR)
-        # =====================================================
         self.bg_black = (0, 0, 0)
         self.header_gray = (115, 115, 115)
-
         self.white = (245, 245, 245)
         self.black = (0, 0, 0)
-
         self.yellow = (0, 230, 255)
         self.green = (80, 190, 80)
         self.red = (40, 40, 255)
         self.gray = (170, 170, 170)
-
         self.pink = (180, 105, 255)
 
-    # =========================================================
-    # TEXT
-    # =========================================================
     def put_text(
         self,
         image,
@@ -88,9 +89,6 @@ class BarrierGateUI:
             thickness=thickness
         )
 
-    # =========================================================
-    # HEADER
-    # =========================================================
     def draw_header(
         self,
         canvas,
@@ -106,7 +104,6 @@ class BarrierGateUI:
             -1
         )
 
-        # Title kiri
         self.put_text(
             canvas,
             "AI POWERED SMART BARRIER GATE",
@@ -116,7 +113,6 @@ class BarrierGateUI:
             thickness=3
         )
 
-        # Status tengah atas
         status_x = int(self.width * 0.49)
 
         self.put_text(
@@ -146,7 +142,6 @@ class BarrierGateUI:
             thickness=2
         )
 
-        # Info kanan atas
         info_x = self.width - 190
 
         self.put_text(
@@ -176,13 +171,7 @@ class BarrierGateUI:
             thickness=2
         )
 
-    # =========================================================
-    # ROI POLYGON
-    # =========================================================
     def get_roi_polygon(self, frame_w, frame_h):
-        """
-        Polygon pink / ungu seperti contoh Anda.
-        """
         pts = np.array(
             [
                 (int(frame_w * 0.32), int(frame_h * 0.40)),
@@ -203,9 +192,6 @@ class BarrierGateUI:
             thickness=6
         )
 
-    # =========================================================
-    # CHECK POINT INSIDE ROI
-    # =========================================================
     def is_detection_inside_roi(
         self,
         x1,
@@ -214,9 +200,6 @@ class BarrierGateUI:
         y2,
         roi_pts
     ):
-        """
-        Penilaian diambil dari center point box.
-        """
         center_x = int((x1 + x2) / 2)
         center_y = int((y1 + y2) / 2)
 
@@ -228,9 +211,6 @@ class BarrierGateUI:
 
         return result >= 0, center_x, center_y
 
-    # =========================================================
-    # GATE LOGIC
-    # =========================================================
     def get_gate_logic(
         self,
         roi_objects,
@@ -260,11 +240,7 @@ class BarrierGateUI:
                 empty_name = name
                 break
 
-        # -----------------------------------------------------
-        # LOADED
-        # -----------------------------------------------------
         if loaded_name is not None:
-
             if loaded_name == "forklift_loaded":
                 line1 = "FORKLIFT TERDETEKSI (ADA MUATAN)"
             else:
@@ -287,11 +263,7 @@ class BarrierGateUI:
                 "gate_state": "lock"
             }
 
-        # -----------------------------------------------------
-        # EMPTY
-        # -----------------------------------------------------
         if empty_name is not None:
-
             if empty_name == "forklift_empty":
                 line1 = "FORKLIFT TERDETEKSI (TIDAK ADA MUATAN)"
             else:
@@ -313,11 +285,7 @@ class BarrierGateUI:
             "gate_state": "standby"
         }
 
-    # =========================================================
-    # GATE BAR
-    # =========================================================
     def get_gate_bar_style(self, gate_state):
-
         if gate_state == "open":
             return self.green, "OPEN"
 
@@ -357,25 +325,15 @@ class BarrierGateUI:
             thickness=2
         )
 
-    # =========================================================
-    # DRAW DETECTIONS
-    # =========================================================
     def draw_detections(
         self,
         frame,
         detections,
         roi_pts
     ):
-        """
-        Return:
-        - frame yang sudah digambar
-        - list object yang valid di dalam ROI
-        """
-
         roi_objects = []
 
         for obj in detections:
-
             x1 = int(obj["x1"])
             y1 = int(obj["y1"])
             x2 = int(obj["x2"])
@@ -388,7 +346,6 @@ class BarrierGateUI:
                 x1, y1, x2, y2, roi_pts
             )
 
-            # Hanya yang di dalam ROI yang dipakai untuk penilaian
             if inside_roi:
                 roi_objects.append(obj)
 
@@ -410,13 +367,12 @@ class BarrierGateUI:
                 self.put_text(
                     frame,
                     label,
-                    (x1, max(00, y1 - 8)),
+                    (x1, max(0, y1 - 8)),
                     scale=0.50,
                     color=color,
                     thickness=2
                 )
 
-                # titik center
                 cv2.circle(
                     frame,
                     (cx, cy),
@@ -426,8 +382,6 @@ class BarrierGateUI:
                 )
 
             else:
-                # Object di luar ROI diabaikan untuk gate
-                # Kalau mau tetap ditampilkan, pakai warna abu-abu tipis
                 cv2.rectangle(
                     frame,
                     (x1, y1),
@@ -438,9 +392,6 @@ class BarrierGateUI:
 
         return frame, roi_objects
 
-    # =========================================================
-    # RENDER
-    # =========================================================
     def render(
         self,
         frame,
@@ -451,8 +402,18 @@ class BarrierGateUI:
         validate_right=False
     ):
         """
-        validate_right dipakai sebagai validate gate utama.
+        Accepts either legacy detections or raw best4 detections.
+        Raw best4 detections are adapted here so main.py keeps the old UI output.
         """
+        detections = adapt_best4_detections(
+            detections,
+            min_vehicle_conf=MIN_CONF_VEHICLE,
+            min_object_conf=MIN_CONF_OBJECT,
+            expand_x=LOAD_ASSOCIATION_EXPAND_X,
+            expand_top=LOAD_ASSOCIATION_EXPAND_TOP,
+            expand_bottom=LOAD_ASSOCIATION_EXPAND_BOTTOM,
+            min_object_overlap=LOAD_ASSOCIATION_MIN_OBJECT_OVERLAP,
+        )
 
         canvas = np.zeros(
             (self.height, self.width, 3),
@@ -460,7 +421,6 @@ class BarrierGateUI:
         )
         canvas[:] = self.bg_black
 
-        # Area kamera
         cam_y1 = self.top_height
         cam_y2 = self.height - self.bottom_height
         cam_h = cam_y2 - cam_y1
@@ -472,7 +432,6 @@ class BarrierGateUI:
             interpolation=cv2.INTER_LINEAR
         )
 
-        # Scale detections ke frame display
         original_h, original_w = frame.shape[:2]
         scale_x = cam_w / original_w
         scale_y = cam_h / original_h
@@ -491,32 +450,26 @@ class BarrierGateUI:
                 }
             )
 
-        # ROI polygon
         roi_pts = self.get_roi_polygon(cam_w, cam_h)
 
-        # Draw detections and collect only inside ROI
         display_frame, roi_objects = self.draw_detections(
             display_frame,
             scaled_detections,
             roi_pts
         )
 
-        # Draw ROI
         self.draw_roi_polygon(
             display_frame,
             roi_pts
         )
 
-        # Gate logic berdasarkan object di ROI saja
         gate_logic = self.get_gate_logic(
             roi_objects,
             validated=validate_right
         )
 
-        # Pasang frame ke canvas
         canvas[cam_y1:cam_y2, 0:self.width] = display_frame
 
-        # Header
         self.draw_header(
             canvas,
             fps,
@@ -524,7 +477,6 @@ class BarrierGateUI:
             gate_logic
         )
 
-        # Bottom gate status
         self.draw_bottom_gate_status(
             canvas,
             gate_logic
