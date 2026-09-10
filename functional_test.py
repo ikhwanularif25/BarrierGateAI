@@ -50,18 +50,13 @@ TRACKED_CLASSES = {
 
 
 def convert_detections(result, detector):
-    """Convert raw Ultralytics boxes into simple dictionaries."""
+    """Convert YOLO best4 output to simple dictionaries."""
     detections = []
 
     for box in result.boxes:
         class_id = int(box.cls[0])
         confidence = float(box.conf[0])
-        class_name = (
-            detector.model.names[class_id]
-            .replace("empety", "empty")
-            .strip()
-            .lower()
-        )
+        class_name = str(detector.model.names[class_id]).strip().lower()
 
         x1, y1, x2, y2 = (
             box.xyxy[0]
@@ -86,10 +81,7 @@ def convert_detections(result, detector):
 
 
 def derive_legacy_detections(raw_detections):
-    """
-    Adapt best4 raw classes (forklift/trolley/object) into the legacy
-    forklift_loaded/forklift_empty/troli_loaded/troli_empty contract.
-    """
+    """forklift/trolley/object -> legacy loaded/empty contract."""
     return adapt_best4_detections(
         raw_detections,
         min_vehicle_conf=MIN_CONF_VEHICLE,
@@ -101,49 +93,46 @@ def derive_legacy_detections(raw_detections):
     )
 
 
-def filter_detection_confidence(detections):
-    """Filter legacy class-specific confidence before UI/gate/logger/Node-RED."""
+def filter_decision_confidence(detections):
+    """Confidence filter for derived loaded/empty decisions only."""
     filtered = []
 
     for obj in detections:
-        class_name = str(obj.get("name", "")).replace("empety", "empty")
+        class_name = str(obj.get("name", "")).strip().lower()
         confidence = float(obj.get("confidence", 0.0))
 
         if class_name not in TRACKED_CLASSES:
             continue
 
-        if class_name.endswith("_loaded"):
-            if confidence < MIN_CONF_LOADED:
-                continue
-
-        elif class_name.endswith("_empty"):
-            if confidence < MIN_CONF_EMPTY:
-                continue
-
-        else:
+        if class_name.endswith("_loaded") and confidence < MIN_CONF_LOADED:
             continue
 
-        obj_filtered = dict(obj)
-        obj_filtered["name"] = class_name
-        filtered.append(obj_filtered)
+        if class_name.endswith("_empty") and confidence < MIN_CONF_EMPTY:
+            continue
+
+        item = dict(obj)
+        item["name"] = class_name
+        filtered.append(item)
 
     return filtered
 
 
-def get_ui2_qualified_detections(ui, frame, detections):
-    """Rule UI2: center point bounding box harus berada di polygon pink."""
+def get_roi_qualified_detections(ui, frame, detections):
+    """
+    Return only detections whose bounding-box center point is inside pink ROI.
+    This function is the single outbound filter for Node-RED and logger.
+    """
     if frame is None or not detections:
         return []
 
     original_h, original_w = frame.shape[:2]
-
     cam_w = ui.width
     cam_h = ui.height - ui.top_height - ui.bottom_height
 
     scale_x = cam_w / original_w
     scale_y = cam_h / original_h
-
     roi_pts = ui.get_roi_polygon(cam_w, cam_h)
+
     qualified = []
 
     for obj in detections:
@@ -167,8 +156,8 @@ def get_ui2_qualified_detections(ui, frame, detections):
 
 
 def build_node_red_payload(obj):
-    """Keep the Node-RED JSON contract identical to the previous branch."""
-    class_name = str(obj.get("name", "")).replace("empety", "empty")
+    """Keep existing Node-RED payload contract."""
+    class_name = str(obj.get("name", "")).strip().lower()
     confidence = float(obj.get("confidence", 0.0))
 
     if class_name.startswith("forklift"):
@@ -198,26 +187,46 @@ def build_node_red_payload(obj):
     }
 
 
+def print_detection_debug(raw_detections, decisions, qualified):
+    if raw_detections:
+        raw_text = ", ".join(
+            f'{obj["name"]} {float(obj["confidence"]):.2f}'
+            for obj in raw_detections
+        )
+        print("[MODEL]", raw_text)
+    else:
+        print("[MODEL] no detection")
+
+    if decisions:
+        decision_text = ", ".join(
+            f'{obj["name"]} {float(obj["confidence"]):.2f}'
+            for obj in decisions
+        )
+        print("[DECISION]", decision_text)
+
+    if qualified:
+        qualified_text = ", ".join(
+            f'{obj["name"]} {float(obj["confidence"]):.2f}'
+            for obj in qualified
+        )
+        print("[ROI SEND]", qualified_text)
+
+
 def main():
     print("=" * 70)
-    print("BARRIER GATE AI - UI2 FUNCTIONAL TEST LOGGER - BEST4")
+    print("BARRIER GATE AI - BEST4 ROI FUNCTIONAL TEST")
     print("=" * 70)
     print("Mode       :", CAMERA_MODE)
     print("Camera     :", f"CAM{CAMERA_NUMBER:03d}")
     print("Model      :", MODEL_PATH)
     print("Image size :", IMAGE_SIZE)
     print("Confidence :", CONFIDENCE)
-    print("Raw vehicle:", MIN_CONF_VEHICLE)
-    print("Raw object :", MIN_CONF_OBJECT)
-    print("Min empty  :", MIN_CONF_EMPTY)
-    print("Min loaded :", MIN_CONF_LOADED)
-    print("Cooldown   :", FUNCTION_TEST_COOLDOWN, "seconds")
-    print("UI         : UI2 (legacy output unchanged)")
-    print(
-        "Load rule   : vehicle + spatially-associated object => loaded; "
-        "vehicle without associated object => empty"
-    )
-    print("Log rule   : confidence + legacy class + center point inside UI2 pink ROI")
+    print("Vehicle min:", MIN_CONF_VEHICLE)
+    print("Object min :", MIN_CONF_OBJECT)
+    print("Empty min  :", MIN_CONF_EMPTY)
+    print("Loaded min :", MIN_CONF_LOADED)
+    print("Display    : ALL raw model detections")
+    print("Send rule  : ONLY derived decision center-point inside pink ROI")
 
     mode = CAMERA_MODE.strip().lower()
     screen_width, screen_height = get_screen_resolution()
@@ -252,7 +261,6 @@ def main():
     )
 
     node_red_sender = None
-
     if NODE_RED_ENABLED:
         node_red_sender = NodeRedSender(
             url=NODE_RED_URL,
@@ -294,17 +302,13 @@ def main():
         )
         cv2.waitKey(100)
     else:
-        cv2.resizeWindow(
-            WINDOW_NAME,
-            screen_width,
-            screen_height,
-        )
+        cv2.resizeWindow(WINDOW_NAME, screen_width, screen_height)
 
     previous_time = time.perf_counter()
     fps_smooth = 0.0
     last_frame_id = -1
+    last_debug_time = 0.0
     total_logged = 0
-    last_adapter_debug = 0.0
 
     try:
         while True:
@@ -332,52 +336,30 @@ def main():
 
                 frame_timestamp = time.perf_counter()
 
-            # =================================================
-            # YOLO RAW: forklift / trolley / object
-            # =================================================
+            # 1. RAW MODEL READING - always preserved for display.
             result = detector.detect(frame)
             raw_detections = convert_detections(result, detector)
 
-            # =================================================
-            # BEST4 ADAPTER -> LEGACY OUTPUT
-            # =================================================
+            # 2. Derive loaded/empty from forklift/trolley + object relation.
             derived_detections = derive_legacy_detections(raw_detections)
+            decisions = filter_decision_confidence(derived_detections)
+
+            # 3. Outbound data must pass ROI center-point rule.
+            qualified = get_roi_qualified_detections(
+                ui,
+                frame,
+                decisions,
+            )
 
             debug_now = time.perf_counter()
-            if debug_now - last_adapter_debug >= 0.5:
-                if raw_detections:
-                    raw_text = ", ".join(
-                        f'{obj["name"]} {float(obj["confidence"]):.2f}'
-                        for obj in raw_detections
-                    )
-                    print("[RAW DET]", raw_text)
-
-                if derived_detections:
-                    derived_parts = []
-                    for obj in derived_detections:
-                        text = (
-                            f'{obj["name"]} {float(obj["confidence"]):.2f}'
-                        )
-                        if obj.get("associated_object_count") is not None:
-                            text += (
-                                f' | cargo={obj.get("associated_object_count", 0)}'
-                            )
-                        derived_parts.append(text)
-                    print("[ADAPTED]", ", ".join(derived_parts))
-
-                last_adapter_debug = debug_now
-
-            # Threshold legacy dipakai untuk UI + gate + logger + Node-RED.
-            detections = filter_detection_confidence(derived_detections)
-            detection_count = len(detections)
+            if debug_now - last_debug_time >= 0.5:
+                print_detection_debug(raw_detections, decisions, qualified)
+                last_debug_time = debug_now
 
             inference_ms = 0.0
             if hasattr(result, "speed"):
                 inference_ms = result.speed.get("inference", 0.0)
 
-            # =================================================
-            # FPS
-            # =================================================
             current_time = time.perf_counter()
             delta = current_time - previous_time
             previous_time = current_time
@@ -388,40 +370,26 @@ def main():
             else:
                 fps_smooth = (fps_smooth * 0.90) + (fps * 0.10)
 
-            # =================================================
-            # RENDER UI2 - OUTPUT LEGACY TETAP SAMA
-            # =================================================
+            # 4. UI displays ALL raw best4 detections.
+            #    Gate status uses derived decisions, and UI applies ROI again.
             display = ui.render(
                 frame=frame,
-                detections=detections,
+                detections=raw_detections,
+                decision_detections=decisions,
                 fps=fps_smooth,
                 inference_ms=inference_ms,
                 validate_left=validate_left,
                 validate_right=validate_right,
             )
 
-            # =================================================
-            # HANYA DATA YANG LOLOS KETENTUAN UI2
-            # =================================================
-            qualified = get_ui2_qualified_detections(
-                ui,
-                frame,
-                detections,
-            )
-
-            # =================================================
-            # NODE-RED JSON - CONTRACT TIDAK BERUBAH
-            # =================================================
+            # 5. ONLY ROI-qualified decisions are sent to Node-RED.
             if node_red_sender:
                 for obj in qualified:
                     payload = build_node_red_payload(obj)
-
                     if payload:
                         node_red_sender.send(payload)
 
-            # =================================================
-            # SPREADSHEET / SNAPSHOT LOGGER
-            # =================================================
+            # 6. ONLY ROI-qualified decisions are logged/sent to spreadsheet.
             new_logs = logger.process(
                 snapshot_frame=display,
                 qualified_detections=qualified,
@@ -430,9 +398,6 @@ def main():
             )
             total_logged += new_logs
 
-            # =================================================
-            # LATENCY
-            # =================================================
             if mode == "rtsp":
                 total_latency_ms = (
                     time.perf_counter() - frame_timestamp
@@ -469,8 +434,8 @@ def main():
 
             cv2.putText(
                 display,
-                f"DET {detection_count}",
-                (max(15, screen_width - 470), 35),
+                f"MODEL {len(raw_detections)} | ROI SEND {len(qualified)}",
+                (max(15, screen_width - 620), 35),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.50,
                 (255, 255, 255),
