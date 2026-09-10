@@ -19,25 +19,50 @@ load_dotenv(BASE_DIR / ".env")
 # =========================================================
 
 PROJECT_NAME = "Smart Barrier Gate AI"
-VERSION = "1.0.1"
+VERSION = "1.1.0-best4"
 
 
 # =========================================================
 # MODEL
 # =========================================================
 
-MODEL_PATH = BASE_DIR / "models" / "best2.pt"
+# best4 classes:
+# - forklift
+# - trolley / troli
+# - object
+#
+# Loaded / empty tidak lagi berasal langsung dari class model.
+# Status tersebut diturunkan oleh best4_adapter.py berdasarkan relasi spasial
+# antara kendaraan dan object, lalu dikembalikan ke format output legacy.
+MODEL_PATH = BASE_DIR / "models" / "best4.onnx"
 
 # Global YOLO threshold. Detection di bawah nilai ini tidak dikeluarkan model.
 CONFIDENCE = 0.35
 IMAGE_SIZE = 416 #640
 
 # =========================================================
-# CLASS-SPECIFIC CONFIDENCE FILTER
+# BEST4 RAW CLASS FILTER + SPATIAL ASSOCIATION
 # =========================================================
-# Filter tambahan setelah YOLO.
-# Dibuat terpisah karena keputusan EMPTY lebih kritis: EMPTY dapat menjadi
-# dasar auto-open, sedangkan LOADED harus cukup yakin sebelum dicatat.
+
+MIN_CONF_VEHICLE = 0.35
+MIN_CONF_OBJECT = 0.35
+
+# Area pencarian muatan relatif terhadap bounding box forklift/trolley.
+# Nilai ini sengaja sedikit diperluas karena bbox object/cargo dapat berada
+# di atas atau sedikit di depan bbox kendaraan.
+LOAD_ASSOCIATION_EXPAND_X = 0.25
+LOAD_ASSOCIATION_EXPAND_TOP = 0.35
+LOAD_ASSOCIATION_EXPAND_BOTTOM = 0.15
+
+# Minimum intersection terhadap luas bbox object jika center object tidak
+# masuk ke expanded vehicle box.
+LOAD_ASSOCIATION_MIN_OBJECT_OVERLAP = 0.10
+
+# =========================================================
+# LEGACY OUTPUT CONFIDENCE FILTER
+# =========================================================
+# Setelah best4_adapter mengubah kelas menjadi forklift_loaded,
+# forklift_empty, troli_loaded, troli_empty, threshold lama tetap digunakan.
 
 MIN_CONF_EMPTY = 0.55
 MIN_CONF_LOADED = 0.60
@@ -178,20 +203,11 @@ MAX_DISTANCE = 5.0
 
 # =========================================================
 
-
-
 NODE_RED_ENABLED = True
 
-
-
 NODE_RED_URL = (
-
     "http://192.168.5.2:1880/"
-
     "barrier-gate/detection"
-
 )
-
-
 
 NODE_RED_TIMEOUT = 3.0
