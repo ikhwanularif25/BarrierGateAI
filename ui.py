@@ -174,8 +174,8 @@ class BarrierGateUI:
     def get_roi_polygon(self, frame_w, frame_h):
         return np.array(
             [
-                (int(frame_w * 0.32), int(frame_h * 0.40)),
-                (int(frame_w * 0.58), int(frame_h * 0.16)),
+                (int(frame_w * 0.33), int(frame_h * 0.50)),
+                (int(frame_w * 0.63), int(frame_h * 0.24)),
                 (int(frame_w * 0.90), int(frame_h * 0.58)),
                 (int(frame_w * 0.57), int(frame_h * 1.03)),
             ],
