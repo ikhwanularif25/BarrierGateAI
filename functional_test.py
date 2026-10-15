@@ -19,17 +19,10 @@ from config import (
     MAX_DISTANCE,
     MIN_CONF_EMPTY,
     MIN_CONF_LOADED,
-    MIN_CONF_VEHICLE,
-    MIN_CONF_OBJECT,
-    LOAD_ASSOCIATION_EXPAND_X,
-    LOAD_ASSOCIATION_EXPAND_TOP,
-    LOAD_ASSOCIATION_EXPAND_BOTTOM,
-    LOAD_ASSOCIATION_MIN_OBJECT_OVERLAP,
     NODE_RED_ENABLED,
     NODE_RED_URL,
     NODE_RED_TIMEOUT,
 )
-from best4_adapter import adapt_best4_detections
 from detector import Detector
 from functional_test_logger import FunctionalTestLogger
 from main import get_screen_resolution, open_camera
@@ -37,9 +30,22 @@ from node_red_sender import NodeRedSender
 from ui import BarrierGateUI
 
 
-FUNCTION_TEST_WEBHOOK_URL = os.getenv("FUNCTION_TEST_WEBHOOK_URL", "")
-FUNCTION_TEST_COOLDOWN = float(os.getenv("FUNCTION_TEST_COOLDOWN", "10"))
-FUNCTION_TEST_SNAPSHOT_DIR = BASE_DIR / "functional_test_snapshots"
+FUNCTION_TEST_WEBHOOK_URL = os.getenv(
+    "FUNCTION_TEST_WEBHOOK_URL", ""
+)
+FUNCTION_TEST_COOLDOWN = float(
+    os.getenv("FUNCTION_TEST_COOLDOWN", "10")
+)
+FUNCTION_TEST_SNAPSHOT_DIR = (
+    BASE_DIR / "functional_test_snapshots"
+)
+
+# Interval pengiriman deteksi LOADED / EMPTY.
+NODE_RED_DETECTION_INTERVAL = 1.0
+
+# Frame RTSP yang terlalu lama tidak dipakai untuk
+# menyatakan bahwa area kosong.
+MAX_PRESENCE_FRAME_AGE_SECONDS = 2.0
 
 TRACKED_CLASSES = {
     "forklift_loaded",
@@ -48,15 +54,32 @@ TRACKED_CLASSES = {
     "troli_empty",
 }
 
+PRESENCE_CLASSES = TRACKED_CLASSES | {
+    "forklift",
+    "trolley",
+    "troli",
+}
+
+
+def normalize_class_name(value):
+    return (
+        str(value)
+        .strip()
+        .lower()
+        .replace("empety", "empty")
+    )
+
 
 def convert_detections(result, detector):
-    """Convert YOLO best4 output to simple dictionaries."""
     detections = []
 
     for box in result.boxes:
         class_id = int(box.cls[0])
         confidence = float(box.conf[0])
-        class_name = str(detector.model.names[class_id]).strip().lower()
+
+        class_name = normalize_class_name(
+            detector.model.names[class_id]
+        )
 
         x1, y1, x2, y2 = (
             box.xyxy[0]
@@ -80,34 +103,33 @@ def convert_detections(result, detector):
     return detections
 
 
-def derive_legacy_detections(raw_detections):
-    """forklift/trolley/object -> legacy loaded/empty contract."""
-    return adapt_best4_detections(
-        raw_detections,
-        min_vehicle_conf=MIN_CONF_VEHICLE,
-        min_object_conf=MIN_CONF_OBJECT,
-        expand_x=LOAD_ASSOCIATION_EXPAND_X,
-        expand_top=LOAD_ASSOCIATION_EXPAND_TOP,
-        expand_bottom=LOAD_ASSOCIATION_EXPAND_BOTTOM,
-        min_object_overlap=LOAD_ASSOCIATION_MIN_OBJECT_OVERLAP,
-    )
-
-
-def filter_decision_confidence(detections):
-    """Confidence filter for derived loaded/empty decisions only."""
+def filter_detection_confidence(detections):
+    """
+    Filter confidence tambahan untuk keputusan LOADED/EMPTY,
+    tampilan, logger, dan payload deteksi Node-RED.
+    """
     filtered = []
 
     for obj in detections:
-        class_name = str(obj.get("name", "")).strip().lower()
-        confidence = float(obj.get("confidence", 0.0))
+        class_name = normalize_class_name(
+            obj.get("name", "")
+        )
+        confidence = float(
+            obj.get("confidence", 0.0)
+        )
 
         if class_name not in TRACKED_CLASSES:
             continue
 
-        if class_name.endswith("_loaded") and confidence < MIN_CONF_LOADED:
-            continue
+        if class_name.endswith("_loaded"):
+            if confidence < MIN_CONF_LOADED:
+                continue
 
-        if class_name.endswith("_empty") and confidence < MIN_CONF_EMPTY:
+        elif class_name.endswith("_empty"):
+            if confidence < MIN_CONF_EMPTY:
+                continue
+
+        else:
             continue
 
         item = dict(obj)
@@ -117,22 +139,26 @@ def filter_decision_confidence(detections):
     return filtered
 
 
-def get_roi_qualified_detections(ui, frame, detections):
+def get_ui2_qualified_detections(ui, frame, detections):
     """
-    Return only detections whose bounding-box center point is inside pink ROI.
-    This function is the single outbound filter for Node-RED and logger.
+    Menggunakan pemeriksaan ROI yang sama dengan UI2.
     """
     if frame is None or not detections:
         return []
 
     original_h, original_w = frame.shape[:2]
+
     cam_w = ui.width
-    cam_h = ui.height - ui.top_height - ui.bottom_height
+    cam_h = (
+        ui.height
+        - ui.top_height
+        - ui.bottom_height
+    )
 
     scale_x = cam_w / original_w
     scale_y = cam_h / original_h
-    roi_pts = ui.get_roi_polygon(cam_w, cam_h)
 
+    roi_pts = ui.get_roi_polygon(cam_w, cam_h)
     qualified = []
 
     for obj in detections:
@@ -155,10 +181,38 @@ def get_roi_qualified_detections(ui, frame, detections):
     return qualified
 
 
+def get_vehicle_presence(ui, frame, raw_detections):
+    """
+    Pemeriksaan keberadaan kendaraan dilakukan sebelum
+    filter MIN_CONF_EMPTY / MIN_CONF_LOADED.
+
+    raw_detections tetap mengikuti threshold dasar
+    CONFIDENCE yang digunakan oleh detector.
+    """
+    vehicles = [
+        obj
+        for obj in raw_detections
+        if normalize_class_name(
+            obj.get("name", "")
+        ) in PRESENCE_CLASSES
+    ]
+
+    vehicles_in_roi = get_ui2_qualified_detections(
+        ui,
+        frame,
+        vehicles,
+    )
+
+    return bool(vehicles_in_roi)
+
+
 def build_node_red_payload(obj):
-    """Keep existing Node-RED payload contract."""
-    class_name = str(obj.get("name", "")).strip().lower()
-    confidence = float(obj.get("confidence", 0.0))
+    class_name = normalize_class_name(
+        obj.get("name", "")
+    )
+    confidence = float(
+        obj.get("confidence", 0.0)
+    )
 
     if class_name.startswith("forklift"):
         object_type = "forklift"
@@ -175,7 +229,9 @@ def build_node_red_payload(obj):
         return None
 
     return {
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": datetime.now().strftime(
+            "%Y-%m-%d %H:%M:%S"
+        ),
         "camera": f"CAM{CAMERA_NUMBER:03d}",
         "zone": "OUT",
         "object_type": object_type,
@@ -183,50 +239,27 @@ def build_node_red_payload(obj):
         "class_name": class_name,
         "confidence": round(confidence, 4),
         "inside_roi": True,
+        "has_vehicle": True,
         "source": "BarrierGateAI",
     }
 
 
-def print_detection_debug(raw_detections, decisions, qualified):
-    if raw_detections:
-        raw_text = ", ".join(
-            f'{obj["name"]} {float(obj["confidence"]):.2f}'
-            for obj in raw_detections
-        )
-        print("[MODEL]", raw_text)
-    else:
-        print("[MODEL] no detection")
-
-    if decisions:
-        decision_text = ", ".join(
-            f'{obj["name"]} {float(obj["confidence"]):.2f}'
-            for obj in decisions
-        )
-        print("[DECISION]", decision_text)
-
-    if qualified:
-        qualified_text = ", ".join(
-            f'{obj["name"]} {float(obj["confidence"]):.2f}'
-            for obj in qualified
-        )
-        print("[ROI SEND]", qualified_text)
-
-
 def main():
+    camera_name = f"CAM{CAMERA_NUMBER:03d}"
+
     print("=" * 70)
-    print("BARRIER GATE AI - BEST4 ROI FUNCTIONAL TEST")
+    print("BARRIER GATE AI - UI2 FUNCTIONAL TEST LOGGER")
     print("=" * 70)
     print("Mode       :", CAMERA_MODE)
-    print("Camera     :", f"CAM{CAMERA_NUMBER:03d}")
+    print("Camera     :", camera_name)
     print("Model      :", MODEL_PATH)
     print("Image size :", IMAGE_SIZE)
     print("Confidence :", CONFIDENCE)
-    print("Vehicle min:", MIN_CONF_VEHICLE)
-    print("Object min :", MIN_CONF_OBJECT)
-    print("Empty min  :", MIN_CONF_EMPTY)
-    print("Loaded min :", MIN_CONF_LOADED)
-    print("Display    : ALL raw model detections")
-    print("Send rule  : ONLY derived decision center-point inside pink ROI")
+    print("Min empty  :", MIN_CONF_EMPTY)
+    print("Min loaded :", MIN_CONF_LOADED)
+    print("Cooldown   :", FUNCTION_TEST_COOLDOWN, "seconds")
+    print("Presence   : laporan maksimal setiap 1 detik")
+    print("UI         : UI2")
 
     mode = CAMERA_MODE.strip().lower()
     screen_width, screen_height = get_screen_resolution()
@@ -239,9 +272,35 @@ def main():
 
     print("MODEL CLASSES:", detector.model.names)
 
+    model_names = detector.model.names
+
+    if isinstance(model_names, dict):
+        model_names = model_names.values()
+
+    known_names = {
+        normalize_class_name(name)
+        for name in model_names
+    }
+
+    presence_supported = bool(
+        known_names & PRESENCE_CLASSES
+    )
+
+    if not presence_supported:
+        print(
+            "[PRESENCE] DINONAKTIFKAN: "
+            "model tidak memiliki kelas kendaraan yang dikenal."
+        )
+
     scale_y = screen_height / 1080.0
-    top_height = max(80, int(TOP_BAR_HEIGHT * scale_y))
-    bottom_height = max(55, int(BOTTOM_PANEL_HEIGHT * scale_y))
+    top_height = max(
+        80,
+        int(TOP_BAR_HEIGHT * scale_y),
+    )
+    bottom_height = max(
+        55,
+        int(BOTTOM_PANEL_HEIGHT * scale_y),
+    )
 
     ui = BarrierGateUI(
         width=screen_width,
@@ -257,10 +316,11 @@ def main():
         snapshot_dir=FUNCTION_TEST_SNAPSHOT_DIR,
         webhook_url=FUNCTION_TEST_WEBHOOK_URL,
         cooldown_seconds=FUNCTION_TEST_COOLDOWN,
-        camera_name=f"CAM{CAMERA_NUMBER:03d}",
+        camera_name=camera_name,
     )
 
     node_red_sender = None
+
     if NODE_RED_ENABLED:
         node_red_sender = NodeRedSender(
             url=NODE_RED_URL,
@@ -273,7 +333,10 @@ def main():
     validate_left = False
     validate_right = False
 
-    cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
+    cv2.namedWindow(
+        WINDOW_NAME,
+        cv2.WINDOW_NORMAL,
+    )
 
     startup_frame = np.zeros(
         (screen_height, screen_width, 3),
@@ -283,7 +346,10 @@ def main():
     cv2.putText(
         startup_frame,
         "AI POWERED SMART BARRIER GATE",
-        (max(40, screen_width // 4), screen_height // 2),
+        (
+            max(40, screen_width // 4),
+            screen_height // 2,
+        ),
         cv2.FONT_HERSHEY_SIMPLEX,
         1.2,
         (0, 230, 255),
@@ -302,20 +368,33 @@ def main():
         )
         cv2.waitKey(100)
     else:
-        cv2.resizeWindow(WINDOW_NAME, screen_width, screen_height)
+        cv2.resizeWindow(
+            WINDOW_NAME,
+            screen_width,
+            screen_height,
+        )
 
     previous_time = time.perf_counter()
     fps_smooth = 0.0
     last_frame_id = -1
-    last_debug_time = 0.0
     total_logged = 0
+    last_detection_sent = None
 
     try:
         while True:
+            # =============================================
+            # BACA FRAME
+            # =============================================
             if mode == "rtsp":
-                ret, frame, frame_timestamp, frame_id = camera.read()
+                (
+                    ret,
+                    frame,
+                    frame_timestamp,
+                    frame_id,
+                ) = camera.read()
 
-                if not ret:
+                if not ret or frame is None:
+                    # Kamera gagal: jangan kirim ROI kosong.
                     time.sleep(0.005)
                     continue
 
@@ -324,90 +403,174 @@ def main():
                     continue
 
                 last_frame_id = frame_id
+
             else:
                 ret, frame = camera.read()
 
-                if not ret:
+                if not ret or frame is None:
                     if mode == "video":
-                        camera.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        camera.set(
+                            cv2.CAP_PROP_POS_FRAMES,
+                            0,
+                        )
                         previous_time = time.perf_counter()
                         continue
+
                     break
 
                 frame_timestamp = time.perf_counter()
 
-            # 1. RAW MODEL READING - always preserved for display.
+            # =============================================
+            # INFERENSI
+            # Jika inferensi gagal, program keluar melalui
+            # finally; tidak mengirim has_vehicle=False.
+            # =============================================
             result = detector.detect(frame)
-            raw_detections = convert_detections(result, detector)
 
-            # 2. Derive loaded/empty from forklift/trolley + object relation.
-            derived_detections = derive_legacy_detections(raw_detections)
-            decisions = filter_decision_confidence(derived_detections)
-
-            # 3. Outbound data must pass ROI center-point rule.
-            qualified = get_roi_qualified_detections(
-                ui,
-                frame,
-                decisions,
+            raw_detections = convert_detections(
+                result,
+                detector,
             )
 
-            debug_now = time.perf_counter()
-            if debug_now - last_debug_time >= 0.5:
-                print_detection_debug(raw_detections, decisions, qualified)
-                last_debug_time = debug_now
+            for obj in raw_detections:
+                print(
+                    "[RAW DET]",
+                    obj["name"],
+                    f'{float(obj["confidence"]):.2f}',
+                )
+
+            # =============================================
+            # PRESENCE: SEBELUM FILTER LOADED / EMPTY
+            # =============================================
+            frame_age = (
+                time.perf_counter() - frame_timestamp
+            )
+
+            presence_frame_fresh = (
+                0 <= frame_age
+                <= MAX_PRESENCE_FRAME_AGE_SECONDS
+            )
+
+            if (
+                node_red_sender is not None
+                and presence_supported
+                and presence_frame_fresh
+            ):
+                has_vehicle_in_roi = get_vehicle_presence(
+                    ui,
+                    frame,
+                    raw_detections,
+                )
+
+                # Dipanggil pada setiap frame berhasil.
+                # Sender membatasi pengiriman ke 1x/detik.
+                node_red_sender.send_presence(
+                    camera=camera_name,
+                    has_vehicle=has_vehicle_in_roi,
+                )
+
+            # =============================================
+            # FILTER KEPUTUSAN LOADED / EMPTY
+            # =============================================
+            detections = filter_detection_confidence(
+                raw_detections
+            )
+            detection_count = len(detections)
 
             inference_ms = 0.0
-            if hasattr(result, "speed"):
-                inference_ms = result.speed.get("inference", 0.0)
 
+            if hasattr(result, "speed") and result.speed:
+                inference_ms = result.speed.get(
+                    "inference",
+                    0.0,
+                )
+
+            # =============================================
+            # FPS
+            # =============================================
             current_time = time.perf_counter()
             delta = current_time - previous_time
             previous_time = current_time
-            fps = (1.0 / delta) if delta > 0 else 0.0
+
+            fps = 1.0 / delta if delta > 0 else 0.0
 
             if fps_smooth == 0:
                 fps_smooth = fps
             else:
-                fps_smooth = (fps_smooth * 0.90) + (fps * 0.10)
+                fps_smooth = (
+                    fps_smooth * 0.90
+                    + fps * 0.10
+                )
 
-            # 4. UI displays ALL raw best4 detections.
-            #    Gate status uses derived decisions, and UI applies ROI again.
+            # =============================================
+            # RENDER UI2
+            # =============================================
             display = ui.render(
                 frame=frame,
-                detections=raw_detections,
-                decision_detections=decisions,
+                detections=detections,
                 fps=fps_smooth,
                 inference_ms=inference_ms,
                 validate_left=validate_left,
                 validate_right=validate_right,
             )
 
-            # 5. ONLY ROI-qualified decisions are sent to Node-RED.
-            if node_red_sender:
+            qualified = get_ui2_qualified_detections(
+                ui,
+                frame,
+                detections,
+            )
+
+            # =============================================
+            # KIRIM DETEKSI LOADED / EMPTY
+            # =============================================
+            now = time.monotonic()
+
+            detection_due = (
+                last_detection_sent is None
+                or now - last_detection_sent
+                >= NODE_RED_DETECTION_INTERVAL
+            )
+
+            if node_red_sender is not None and detection_due:
+                sent_any = False
+
                 for obj in qualified:
                     payload = build_node_red_payload(obj)
-                    if payload:
-                        node_red_sender.send(payload)
 
-            # 6. ONLY ROI-qualified decisions are logged/sent to spreadsheet.
+                    if payload is not None:
+                        if node_red_sender.send(payload):
+                            sent_any = True
+
+                if sent_any:
+                    last_detection_sent = now
+
+            # =============================================
+            # SPREADSHEET / SNAPSHOT LOGGER
+            # =============================================
             new_logs = logger.process(
                 snapshot_frame=display,
                 qualified_detections=qualified,
-                source="FUNCTIONAL_TEST_UI2_BEST4",
+                source="FUNCTIONAL_TEST_UI2",
                 zone="OUT",
             )
             total_logged += new_logs
 
+            # =============================================
+            # LATENCY
+            # =============================================
             if mode == "rtsp":
                 total_latency_ms = (
                     time.perf_counter() - frame_timestamp
                 ) * 1000
 
-                latency_text = f"LATENCY {total_latency_ms:.0f} MS"
+                latency_text = (
+                    f"LATENCY {total_latency_ms:.0f} MS"
+                )
                 latency_color = (80, 255, 80)
 
                 if total_latency_ms > 300:
                     latency_color = (0, 255, 255)
+
                 if total_latency_ms > 1000:
                     latency_color = (0, 0, 255)
 
@@ -418,8 +581,13 @@ def main():
                     2,
                 )[0]
 
-                latency_x = screen_width - text_size[0] - 300
-                latency_y = max(35, int(top_height * 0.92))
+                latency_x = (
+                    screen_width - text_size[0] - 300
+                )
+                latency_y = max(
+                    35,
+                    int(top_height * 0.92),
+                )
 
                 cv2.putText(
                     display,
@@ -434,8 +602,8 @@ def main():
 
             cv2.putText(
                 display,
-                f"MODEL {len(raw_detections)} | ROI SEND {len(qualified)}",
-                (max(15, screen_width - 620), 35),
+                f"DET {detection_count}",
+                (max(15, screen_width - 470), 35),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.50,
                 (255, 255, 255),
@@ -451,11 +619,17 @@ def main():
 
             if key == ord("1"):
                 validate_left = not validate_left
-                print("ODOO VALIDATE LEFT =", validate_left)
+                print(
+                    "ODOO VALIDATE LEFT =",
+                    validate_left,
+                )
 
             if key == ord("2"):
                 validate_right = not validate_right
-                print("ODOO VALIDATE RIGHT =", validate_right)
+                print(
+                    "ODOO VALIDATE RIGHT =",
+                    validate_right,
+                )
 
             if key == ord("r"):
                 validate_left = False
@@ -471,10 +645,14 @@ def main():
 
     except KeyboardInterrupt:
         pass
-    finally:
-        print("Functional test logged events:", total_logged)
 
-        if node_red_sender:
+    finally:
+        print(
+            "Functional test logged events:",
+            total_logged,
+        )
+
+        if node_red_sender is not None:
             node_red_sender.close()
 
         logger.close()
