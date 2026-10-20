@@ -294,6 +294,11 @@ def open_camera():
 # =========================================================
 
 def main():
+    from config import DUAL_CAMERA_ENABLED
+    if DUAL_CAMERA_ENABLED and CAMERA_MODE.strip().lower() == "rtsp":
+        from dual_camera import run_dual_camera
+        return run_dual_camera()
+
 
     mode = (
         CAMERA_MODE

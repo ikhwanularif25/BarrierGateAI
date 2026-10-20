@@ -187,6 +187,36 @@ WINDOW_NAME = (
     f"Cam{CAMERA_NUMBER:03d}"
 )
 
+# Posisi fisik CCTV. Kredensial/channel lama menjadi default kedua kamera.
+DUAL_CAMERA_ENABLED = os.getenv("DUAL_CAMERA_ENABLED", "1").lower() not in {"0", "false", "no"}
+CAMERA_STALE_SECONDS = 2.0
+# Video dan inferensi memiliki laju terpisah; tidak mengantre frame AI lama.
+DISPLAY_TARGET_FPS = max(1, min(60, int(os.getenv("DISPLAY_TARGET_FPS", "30"))))
+DETECTION_MAX_AGE_SECONDS = 1.0
+ONNX_CPU_THREADS = max(1, int(os.getenv("ONNX_CPU_THREADS", str(min(8, max(1, (os.cpu_count() or 2) // 2))))))
+
+
+def camera_settings(side, default_ip):
+    prefix = f"CCTV_{side.upper()}_"
+    ip = os.getenv(prefix + "IP", default_ip)
+    username = os.getenv(prefix + "USERNAME", CCTV_USERNAME or "")
+    password = os.getenv(prefix + "PASSWORD", CCTV_PASSWORD or "")
+    port = int(os.getenv(prefix + "PORT", str(CCTV_PORT)))
+    number = int(os.getenv(prefix + "CAMERA_NUMBER", str(CAMERA_NUMBER)))
+    stream = os.getenv(prefix + "STREAM_NUMBER", STREAM_NUMBER)
+    return {
+        "side": side,
+        "ip": ip,
+        "url": (f"rtsp://{quote(username, safe='')}:{quote(password, safe='')}"
+                f"@{ip}:{port}/Streaming/Channels/{number}{stream}"),
+    }
+
+
+CAMERAS = (
+    camera_settings("left", "192.168.6.101"),
+    camera_settings("right", "192.168.6.100"),
+)
+
 FULLSCREEN = True
 
 DISPLAY_WIDTH = 1920

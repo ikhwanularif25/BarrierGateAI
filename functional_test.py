@@ -245,6 +245,11 @@ def build_node_red_payload(obj):
 
 
 def main():
+    from config import DUAL_CAMERA_ENABLED
+    if DUAL_CAMERA_ENABLED and CAMERA_MODE.strip().lower() == "rtsp":
+        from dual_camera import run_dual_camera
+        return run_dual_camera(functional_test=True)
+
     camera_name = f"CAM{CAMERA_NUMBER:03d}"
 
     print("=" * 70)

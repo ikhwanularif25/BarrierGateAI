@@ -542,3 +542,80 @@ class BarrierGateUI:
         )
 
         return canvas
+
+
+class DualCameraUI(BarrierGateUI):
+    """Dua panel independen; ROI dihitung pada koordinat frame asli."""
+
+    def fit_text(self, image, text, x, y, width, scale=0.65, color=(235, 235, 235)):
+        size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, 1)[0][0]
+        scale *= min(1.0, width / max(1, size))
+        self.put_text(image, text, (x, y), scale=scale, color=color, thickness=1)
+
+    def render_dual(self, views, validated=(False, False), fps=0.0):
+        canvas = np.full((self.height, self.width, 3), (22, 18, 15), np.uint8)
+        margin = max(12, self.width // 100)
+        header = max(68, self.height // 12)
+        footer = max(34, self.height // 24)
+        self.fit_text(canvas, "SMART BARRIER GATE  /  DUAL CCTV", margin, header // 2,
+                      self.width - 2 * margin, scale=0.9, color=self.yellow)
+        self.fit_text(canvas, f"2 CAMERA   |   DISPLAY {fps:.1f} FPS", margin, header - 12,
+                      self.width - 2 * margin, scale=0.45)
+        panel_w = (self.width - 3 * margin) // 2
+        panel_h = self.height - header - footer - margin
+        for index, view in enumerate(views):
+            x = margin + index * (panel_w + margin)
+            y = header
+            panel = canvas[y:y + panel_h, x:x + panel_w]
+            panel[:] = (36, 30, 25)
+            pad = max(10, panel_w // 40)
+            label_h, status_h = 65, 104
+            side = "MASUK" if index == 0 else "KELUAR"
+            online = view.get("online", False) and view.get("frame") is not None
+            color = self.green if online else self.red
+            self.fit_text(panel, f"CCTV {side}  |  {view['ip']}", pad, 27,
+                          panel_w - pad * 2, scale=0.7)
+            state = "LIVE" if online else "OFFLINE / MENGHUBUNGKAN ULANG"
+            ready = online and view.get('inference_ready', True)
+            count = len(view.get('detections', [])) if ready else '-'
+            detail = f"{state}   |   AI {view.get('ai_fps', 0):.1f} FPS   |   DET {count}"
+            self.fit_text(panel, detail, pad, 50, panel_w - pad * 2, scale=0.45, color=color)
+            image_h = max(1, panel_h - label_h - status_h)
+            image_w = panel_w - pad * 2
+            image_area = panel[label_h:label_h + image_h, pad:pad + image_w]
+            image_area[:] = (12, 12, 12)
+            if online:
+                frame = view['frame'].copy()
+                fh, fw = frame.shape[:2]
+                roi = self.get_roi_polygon(fw, fh)
+                raw = view.get('detections', [])
+                self.draw_raw_detections(frame, raw, roi)
+                self.draw_roi_polygon(frame, roi)
+                factor = min(image_w / fw, image_h / fh)
+                dw, dh = max(1, int(fw * factor)), max(1, int(fh * factor))
+                dx, dy = (image_w - dw) // 2, (image_h - dh) // 2
+                image_area[dy:dy + dh, dx:dx + dw] = cv2.resize(frame, (dw, dh))
+                if ready:
+                    decisions = view.get('decisions', [])
+                    gate = self.get_gate_logic(self.get_roi_objects(decisions, roi), validated[index])
+                    bar_color, bar_text = self.get_gate_bar_style(gate['gate_state'])
+                    line1, line2 = gate['line1'], gate['line2']
+                else:
+                    bar_color, bar_text = self.gray, "MENUNGGU AI"
+                    line1, line2 = "Video aktif", "Menunggu hasil deteksi terbaru"
+            else:
+                self.put_center_text(image_area, "KAMERA TIDAK TERHUBUNG", 0, 0,
+                                     image_w, image_h, scale=min(0.65, image_w / 560),
+                                     color=self.gray, thickness=1)
+                bar_color, bar_text = self.red, "OFFLINE"
+                line1 = "Menunggu stream CCTV"
+                line2 = "Periksa koneksi kamera dan pengaturan RTSP"
+            sy = panel_h - status_h
+            cv2.rectangle(panel, (pad, sy + 10), (panel_w - pad, sy + 37), bar_color, -1)
+            self.fit_text(panel, bar_text, pad + 8, sy + 30, panel_w - 2 * pad - 16,
+                          scale=0.55, color=self.black)
+            self.fit_text(panel, line1, pad, sy + 60, panel_w - 2 * pad, scale=0.55)
+            self.fit_text(panel, line2, pad, sy + 82, panel_w - 2 * pad, scale=0.5)
+        self.fit_text(canvas, "1: VALIDATE MASUK    2: VALIDATE KELUAR    R: RESET    F: FULLSCREEN    Q / ESC: KELUAR",
+                      margin, self.height - 12, self.width - 2 * margin, scale=0.45)
+        return canvas
