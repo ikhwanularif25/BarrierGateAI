@@ -19,29 +19,25 @@ load_dotenv(BASE_DIR / ".env")
 # =========================================================
 
 PROJECT_NAME = "Smart Barrier Gate AI"
-VERSION = "1.1.0-best4"
+VERSION = "1.2.0-nine-classes"
 
 
 # =========================================================
 # MODEL
 # =========================================================
 
-# best4 classes:
-# - forklift
-# - trolley / troli
-# - object
-#
-# Loaded / empty tidak lagi berasal langsung dari class model.
-# Status tersebut diturunkan oleh best4_adapter.py berdasarkan relasi spasial
-# antara kendaraan dan object, lalu dikembalikan ke format output legacy.
-MODEL_PATH = BASE_DIR / "models" / "best4.onnx"
+# Nine-class model: names/IDs are read from the model metadata.
+# Override MODEL_PATH in .env only when selecting a different model.
+MODEL_PATH = Path(os.getenv("MODEL_PATH", str(BASE_DIR / "models" / "best.onnx")))
+if not MODEL_PATH.is_absolute():
+    MODEL_PATH = BASE_DIR / MODEL_PATH
 
 # Global YOLO threshold. Detection di bawah nilai ini tidak dikeluarkan model.
 CONFIDENCE = 0.35
-IMAGE_SIZE = 416 #640
+IMAGE_SIZE = 640  # best.onnx has fixed input [1, 3, 640, 640]
 
 # =========================================================
-# BEST4 RAW CLASS FILTER + SPATIAL ASSOCIATION
+# VEHICLE / CARGO FILTER + SPATIAL ASSOCIATION
 # =========================================================
 
 MIN_CONF_VEHICLE = 0.35

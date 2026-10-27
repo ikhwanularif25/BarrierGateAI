@@ -212,79 +212,35 @@ class BarrierGateUI:
 
         return result >= 0, center_x, center_y
 
-    def get_gate_logic(
-        self,
-        roi_objects,
-        validated=False
-    ):
-        if not roi_objects:
-            return {
-                "line1": "-",
-                "line2": "-",
-                "line1_color": self.red,
-                "line2_color": self.red,
-                "gate_state": "standby"
-            }
-
-        loaded_name = None
-        empty_name = None
-
-        for obj in roi_objects:
-            name = obj["name"]
-            if name in ["forklift_loaded", "troli_loaded"]:
-                loaded_name = name
-                break
-
-        for obj in roi_objects:
-            name = obj["name"]
-            if name in ["forklift_empty", "troli_empty"]:
-                empty_name = name
-                break
-
-        if loaded_name is not None:
-            if loaded_name == "forklift_loaded":
-                line1 = "FORKLIFT TERDETEKSI (ADA MUATAN)"
-            else:
-                line1 = "TROLI TERDETEKSI (ADA MUATAN)"
-
-            if validated:
-                return {
-                    "line1": line1,
-                    "line2": "VALIDATE OK",
-                    "line1_color": self.green,
-                    "line2_color": self.green,
-                    "gate_state": "open"
-                }
-
-            return {
-                "line1": line1,
-                "line2": "LAKUKAN VALIDATE UNTUK MEMBUKA PORTAL",
-                "line1_color": self.green,
-                "line2_color": self.red,
-                "gate_state": "lock"
-            }
-
-        if empty_name is not None:
-            if empty_name == "forklift_empty":
-                line1 = "FORKLIFT TERDETEKSI (TIDAK ADA MUATAN)"
-            else:
-                line1 = "TROLI TERDETEKSI (TIDAK ADA MUATAN)"
-
-            return {
-                "line1": line1,
-                "line2": "AKAN TERBUKA DALAM 5 DETIK",
-                "line1_color": self.yellow,
-                "line2_color": self.yellow,
-                "gate_state": "countdown"
-            }
-
-        return {
-            "line1": "-",
-            "line2": "-",
-            "line1_color": self.red,
-            "line2_color": self.red,
-            "gate_state": "standby"
-        }
+    def get_gate_logic(self, roi_objects, validated=False):
+        labels = {"forklift": "FORKLIFT", "troli": "TROLI",
+                  "tow_tractor": "KENDARAAN PENARIK",
+                  "three_wheel_garbage_vehicle": "KENDARAAN SAMPAH"}
+        # An uncertain vehicle must not be bypassed by another empty vehicle.
+        for status in ("unknown", "loaded", "empty"):
+            for obj in roi_objects:
+                name = obj["name"]
+                vehicle, _, suffix = name.rpartition("_")
+                if vehicle not in labels or suffix != status:
+                    continue
+                label = labels[vehicle]
+                if status == "unknown":
+                    return dict(line1=f"{label} (MUATAN BELUM PASTI)",
+                                line2="PERIKSA MUATAN DAN TROLLEY YANG DITARIK",
+                                line1_color=self.yellow, line2_color=self.red,
+                                gate_state="lock")
+                if status == "loaded":
+                    return dict(line1=f"{label} TERDETEKSI (ADA MUATAN)",
+                                line2="VALIDATE OK" if validated else "LAKUKAN VALIDATE UNTUK MEMBUKA PORTAL",
+                                line1_color=self.green,
+                                line2_color=self.green if validated else self.red,
+                                gate_state="open" if validated else "lock")
+                return dict(line1=f"{label} TERDETEKSI (TIDAK ADA MUATAN)",
+                            line2="AKAN TERBUKA DALAM 5 DETIK",
+                            line1_color=self.yellow, line2_color=self.yellow,
+                            gate_state="countdown")
+        return dict(line1="-", line2="-", line1_color=self.red,
+                    line2_color=self.red, gate_state="standby")
 
     def get_gate_bar_style(self, gate_state):
         if gate_state == "open":
@@ -331,16 +287,14 @@ class BarrierGateUI:
         if not inside_roi:
             return self.gray
 
-        if name == "forklift":
-            return self.green
-
-        if name in {"trolley", "troli"}:
-            return self.yellow
-
-        if name == "object":
-            return self.white
-
-        return self.white
+        colors = {
+            "forklift": self.green, "trolley": self.yellow, "troli": self.yellow,
+            "pallet_empty": (180, 100, 120), "pallet_loaded": (255, 220, 0),
+            "steel_coil": (100, 180, 230), "steel_pipe": (180, 100, 240),
+            "steel_sheet": (60, 160, 160), "tow_tractor": (120, 160, 255),
+            "three_wheel_garbage_vehicle": (255, 130, 40),
+        }
+        return colors.get(name, self.white)
 
     def draw_raw_detections(
         self,
@@ -349,7 +303,7 @@ class BarrierGateUI:
         roi_pts
     ):
         """
-        Draw every raw best4 model detection.
+        Draw every raw nine-class model detection.
 
         IMPORTANT:
         ROI only changes visual emphasis. Detections outside ROI are still
@@ -451,7 +405,7 @@ class BarrierGateUI:
         decision_detections=None
     ):
         """
-        `detections` is the raw best4 model output and is ALWAYS displayed.
+        `detections` is the raw nine-class model output and is ALWAYS displayed.
 
         `decision_detections` is the legacy loaded/empty result used only for
         gate state. Only decision detections whose center point is inside the
@@ -506,7 +460,7 @@ class BarrierGateUI:
 
         roi_pts = self.get_roi_polygon(cam_w, cam_h)
 
-        # Display every raw best4 reading, including detections outside ROI.
+        # Display every raw nine-class reading, including detections outside ROI.
         display_frame = self.draw_raw_detections(
             display_frame,
             scaled_raw,

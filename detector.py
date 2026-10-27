@@ -2,7 +2,7 @@ from ultralytics import YOLO
 
 
 class Detector:
-    """Thin Ultralytics wrapper for the best4 ONNX model."""
+    """Ultralytics wrapper; class names come from model metadata."""
 
     def __init__(
         self,
@@ -10,7 +10,10 @@ class Detector:
         confidence=0.35,
         image_size=640,
     ):
-        self.model = YOLO(str(model_path))
+        from pathlib import Path
+        if not Path(model_path).is_file():
+            raise FileNotFoundError(f"Model not found: {model_path}")
+        self.model = YOLO(str(model_path), task="detect")
         self.confidence = float(confidence)
         self.image_size = int(image_size)
         self.model_path = str(model_path)
@@ -19,7 +22,12 @@ class Detector:
             self.model.add_callback("on_predict_start", self._configure_cpu_session)
 
         print("Model loaded successfully.")
-        print("Model classes:", self.model.names)
+        from best4_adapter import EXPECTED_MODEL_CLASSES
+        names = self.model.names
+        actual = set(names.values() if isinstance(names, dict) else names)
+        if actual != EXPECTED_MODEL_CLASSES:
+            raise ValueError(f"Model classes do not match nine-class configuration: {sorted(actual)}")
+        print("Model classes:", names)
 
     def _configure_cpu_session(self, predictor):
         """Avoid CPU thread pools spinning while the UI needs to render video."""

@@ -52,12 +52,14 @@ TRACKED_CLASSES = {
     "forklift_empty",
     "troli_loaded",
     "troli_empty",
+    "tow_tractor_loaded", "tow_tractor_unknown",
+    "three_wheel_garbage_vehicle_loaded", "three_wheel_garbage_vehicle_unknown",
 }
 
 PRESENCE_CLASSES = TRACKED_CLASSES | {
     "forklift",
     "trolley",
-    "troli",
+    "troli", "tow_tractor", "three_wheel_garbage_vehicle",
 }
 
 
@@ -129,6 +131,9 @@ def filter_detection_confidence(detections):
             if confidence < MIN_CONF_EMPTY:
                 continue
 
+        elif class_name.endswith("_unknown"):
+            if confidence < CONFIDENCE:
+                continue
         else:
             continue
 
@@ -469,8 +474,9 @@ def main():
             # =============================================
             # FILTER KEPUTUSAN LOADED / EMPTY
             # =============================================
+            from dual_camera import decision_detections
             detections = filter_detection_confidence(
-                raw_detections
+                decision_detections(raw_detections)
             )
             detection_count = len(detections)
 
@@ -504,7 +510,8 @@ def main():
             # =============================================
             display = ui.render(
                 frame=frame,
-                detections=detections,
+                detections=raw_detections,
+                decision_detections=detections,
                 fps=fps_smooth,
                 inference_ms=inference_ms,
                 validate_left=validate_left,

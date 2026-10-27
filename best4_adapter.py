@@ -1,7 +1,14 @@
 import math
 
 
-VEHICLE_CLASSES = {"forklift", "troli"}
+# Keep module/function names for compatibility with existing callers.
+VEHICLE_CLASSES = {"forklift", "troli", "tow_tractor", "three_wheel_garbage_vehicle"}
+CARGO_CLASSES = {"pallet_empty", "pallet_loaded", "steel_coil", "steel_pipe", "steel_sheet", "object"}
+UNCERTAIN_WITHOUT_CARGO = {"tow_tractor", "three_wheel_garbage_vehicle"}
+EXPECTED_MODEL_CLASSES = {
+    "forklift", "pallet_empty", "pallet_loaded", "steel_coil", "steel_pipe",
+    "steel_sheet", "three_wheel_garbage_vehicle", "tow_tractor", "trolley",
+}
 
 
 def normalize_class_name(name):
@@ -98,14 +105,14 @@ def adapt_best4_detections(
     expand_bottom=0.15,
     min_object_overlap=0.10,
 ):
-    """Convert best4 raw classes into the existing BarrierGate output contract.
+    """Associate named cargo with vehicles using the existing spatial heuristic.
 
-    Input model classes:
-        forklift, trolley, object
-
-    Output classes:
-        forklift_loaded, forklift_empty,
-        troli_loaded, troli_empty
+    An empty pallet is still cargo carried by a vehicle. Nested cargo boxes
+    are retained as evidence, not a physical item count. New vehicle types
+    without cargo evidence remain unknown: towed carts can be outside the
+    tractor box, and a garbage vehicle's contents may be concealed.
+    Forklift/troli retain the previous no-associated-object => empty rule.
+    Proximity alone does not prove that a vehicle is carrying an object.
     """
     if not detections:
         return []
@@ -120,7 +127,7 @@ def adapt_best4_detections(
 
         if item["name"] in VEHICLE_CLASSES and confidence >= min_vehicle_conf:
             vehicles.append(item)
-        elif item["name"] == "object" and confidence >= min_object_conf:
+        elif item["name"] in CARGO_CLASSES and confidence >= min_object_conf:
             cargo_objects.append(item)
 
     assignments = {index: [] for index in range(len(vehicles))}
@@ -177,13 +184,21 @@ def adapt_best4_detections(
             item["object_confidence"] = best_object_conf
             item["associated_object_count"] = len(associated)
             item["load_inference"] = "spatial_association"
+        elif vehicle["name"] in UNCERTAIN_WITHOUT_CARGO:
+            item["name"] = f'{vehicle["name"]}_unknown'
+            item["confidence"] = vehicle_conf
+            item["object_confidence"] = None
+            item["associated_object_count"] = 0
+            item["load_inference"] = "unverified_load_or_towed_cart"
         else:
-            item["name"] = f'{vehicle["name"]}_empty'
+            item["name"] = f'{vehicle["name"]}_empty' 
             item["confidence"] = vehicle_conf
             item["object_confidence"] = None
             item["associated_object_count"] = 0
             item["load_inference"] = "no_associated_object"
 
+        item["raw_name"] = vehicle["name"]
+        item["associated_cargo_classes"] = sorted({obj["name"] for obj in associated})
         item["vehicle_confidence"] = vehicle_conf
         derived.append(item)
 
