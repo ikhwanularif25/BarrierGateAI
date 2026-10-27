@@ -190,6 +190,17 @@ WINDOW_NAME = (
 # Posisi fisik CCTV. Kredensial/channel lama menjadi default kedua kamera.
 DUAL_CAMERA_ENABLED = os.getenv("DUAL_CAMERA_ENABLED", "1").lower() not in {"0", "false", "no"}
 CAMERA_STALE_SECONDS = 2.0
+# Koordinat relatif terhadap gambar kamera, bukan panel/letterbox.
+# Urutan titik: kiri, atas, kanan, bawah; mengikuti referensi 26 Oktober.
+# Titik bawah MASUK berada di luar frame agar sisi terpotong seperti referensi.
+CAMERA_ROIS = {
+    "left": ((0.401, 0.588), (0.627, 0.400), (0.887, 0.794), (0.660, 1.232)),
+    "right": ((0.252, 0.528), (0.523, 0.224), (0.710, 0.512), (0.413, 0.942)),
+}
+CAMERA_ROI_STYLES = {
+    "left": {"color": (174, 102, 225), "thickness": 4},
+    "right": {"color": (174, 102, 225), "thickness": 4},
+}
 # Video dan inferensi memiliki laju terpisah; tidak mengantre frame AI lama.
 DISPLAY_TARGET_FPS = max(1, min(60, int(os.getenv("DISPLAY_TARGET_FPS", "30"))))
 DETECTION_MAX_AGE_SECONDS = 1.0

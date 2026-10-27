@@ -148,24 +148,16 @@ def get_ui2_qualified_detections(ui, frame, detections):
 
     original_h, original_w = frame.shape[:2]
 
-    cam_w = ui.width
-    cam_h = (
-        ui.height
-        - ui.top_height
-        - ui.bottom_height
-    )
-
-    scale_x = cam_w / original_w
-    scale_y = cam_h / original_h
-
-    roi_pts = ui.get_roi_polygon(cam_w, cam_h)
+    # Match rendering in native camera coordinates; panel resizing/letterboxing
+    # must not move decision boundaries. DualCameraUI defaults to right/OUT.
+    roi_pts = ui.get_roi_polygon(original_w, original_h)
     qualified = []
 
     for obj in detections:
-        sx1 = int(obj["x1"] * scale_x)
-        sy1 = int(obj["y1"] * scale_y)
-        sx2 = int(obj["x2"] * scale_x)
-        sy2 = int(obj["y2"] * scale_y)
+        sx1 = int(obj["x1"])
+        sy1 = int(obj["y1"])
+        sx2 = int(obj["x2"])
+        sy2 = int(obj["y2"])
 
         inside_roi, _, _ = ui.is_detection_inside_roi(
             sx1,

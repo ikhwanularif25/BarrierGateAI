@@ -9,6 +9,8 @@ from config import (
     LOAD_ASSOCIATION_EXPAND_TOP,
     LOAD_ASSOCIATION_EXPAND_BOTTOM,
     LOAD_ASSOCIATION_MIN_OBJECT_OVERLAP,
+    CAMERA_ROIS,
+    CAMERA_ROI_STYLES,
 )
 
 
@@ -182,13 +184,13 @@ class BarrierGateUI:
             dtype=np.int32
         )
 
-    def draw_roi_polygon(self, frame, pts):
+    def draw_roi_polygon(self, frame, pts, color=None, thickness=6):
         cv2.polylines(
             frame,
             [pts],
             isClosed=True,
-            color=self.pink,
-            thickness=6
+            color=self.pink if color is None else color,
+            thickness=thickness
         )
 
     def is_detection_inside_roi(
@@ -547,6 +549,12 @@ class BarrierGateUI:
 class DualCameraUI(BarrierGateUI):
     """Dua panel independen; ROI dihitung pada koordinat frame asli."""
 
+    def get_roi_polygon(self, frame_w, frame_h, side="right"):
+        # Legacy functional-test helpers belong to the right/OUT camera.
+        # Rendering explicitly selects each side so their ROIs stay independent.
+        return np.array([(int(frame_w * x), int(frame_h * y))
+                         for x, y in CAMERA_ROIS[side]], dtype=np.int32)
+
     def fit_text(self, image, text, x, y, width, scale=0.65, color=(235, 235, 235)):
         size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, 1)[0][0]
         scale *= min(1.0, width / max(1, size))
@@ -587,10 +595,11 @@ class DualCameraUI(BarrierGateUI):
             if online:
                 frame = view['frame'].copy()
                 fh, fw = frame.shape[:2]
-                roi = self.get_roi_polygon(fw, fh)
+                camera_side = "left" if index == 0 else "right"
+                roi = self.get_roi_polygon(fw, fh, camera_side)
                 raw = view.get('detections', [])
                 self.draw_raw_detections(frame, raw, roi)
-                self.draw_roi_polygon(frame, roi)
+                self.draw_roi_polygon(frame, roi, **CAMERA_ROI_STYLES[camera_side])
                 factor = min(image_w / fw, image_h / fh)
                 dw, dh = max(1, int(fw * factor)), max(1, int(fh * factor))
                 dx, dy = (image_w - dw) // 2, (image_h - dh) // 2
