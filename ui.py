@@ -272,7 +272,7 @@ class BarrierGateUI:
 
             return {
                 "line1": line1,
-                "line2": "AKAN TERBUKA DALAM 5 DETIK",
+                "line2": "EMPTY | MENUNGGU KEPUTUSAN NODE-RED",
                 "line1_color": self.yellow,
                 "line2_color": self.yellow,
                 "gate_state": "countdown"
@@ -294,7 +294,7 @@ class BarrierGateUI:
             return self.red, "LOCK"
 
         if gate_state == "countdown":
-            return self.yellow, "TERBUKA DALAM 5 DETIK"
+            return self.yellow, "EMPTY | MENUNGGU NODE-RED"
 
         return self.gray, "STANDBY"
 

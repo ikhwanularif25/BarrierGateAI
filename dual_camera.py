@@ -66,7 +66,7 @@ class StreamReader:
 
     def close(self):
         self.stop.set()
-        self.thread.join(timeout=5)
+        self.thread.join(timeout=3)
 
 
 def convert_result(result, detector):
@@ -164,7 +164,7 @@ class InferenceWorker:
     def close(self):
         self.stop.set()
         if self.thread.ident is not None:
-            self.thread.join(timeout=5)
+            self.thread.join(timeout=3)
 
 
 def build_views(readers, results, now):
@@ -234,6 +234,95 @@ class RightCameraEvents:
         self.logger.close()
 
 
+class SharedGateEvents(RightCameraEvents):
+    """One gate: accept either camera, but publish one combined presence state."""
+    def __init__(self, detector, ui):
+        super().__init__(detector, ui)
+        self.last_logged_sequences = [None, None]
+        self.last_reason = None
+        self.last_reason_at = 0.0
+
+    def process(self, results, display):
+        ft = self.ft
+        now = time.perf_counter()
+        sources = []
+        for index, result in enumerate(results):
+            if result is None or not 0 <= now - result['timestamp'] <= DETECTION_MAX_AGE_SECONDS:
+                sources.append(None)
+                continue
+            frame = result['frame']
+            side = CAMERAS[index]['side']
+            roi = self.ui.get_roi_polygon(frame.shape[1], frame.shape[0], side)
+            raw = result['detections']
+            vehicles = [obj for obj in raw
+                        if ft.normalize_class_name(obj.get('name', '')) in ft.PRESENCE_CLASSES]
+            present = bool(self.ui.get_roi_objects(vehicles, roi))
+            # Check loaded evidence before the higher message thresholds too.
+            # A weak loaded reading must not let an EMPTY on the other side bypass it.
+            derived = self.ui.get_roi_objects(decision_detections(raw), roi)
+            qualified = self.ui.get_roi_objects(ft.filter_detection_confidence(result['decisions']), roi)
+            sources.append(dict(index=index, result=result, present=present,
+                                loaded=any(o['name'].endswith('_loaded') for o in derived),
+                                qualified=qualified))
+
+        all_fresh = len(sources) == len(CAMERAS) and all(s is not None for s in sources)
+        present = any(s and s['present'] for s in sources)
+        loaded = any(s and s['loaded'] for s in sources)
+        if self.sender and self.presence_supported:
+            if present:
+                self.sender.send_presence(camera=self.camera_name, has_vehicle=True)
+            elif all_fresh:
+                self.sender.send_presence(camera=self.camera_name, has_vehicle=False)
+            # Unknown/stale camera is never reported as a clear gate area.
+
+        candidates = [(s, obj) for s in sources if s for obj in s['qualified']]
+        if loaded:
+            candidates = [(s, obj) for s, obj in candidates if obj['name'].endswith('_loaded')]
+        elif not all_fresh:
+            candidates = [(s, obj) for s, obj in candidates if not obj['name'].endswith('_empty')]
+
+        selected = max(candidates, key=lambda item: item[1]['confidence'], default=None)
+        due = self.last_sent is None or time.monotonic() - self.last_sent >= ft.NODE_RED_DETECTION_INTERVAL
+        if selected and due and self.sender:
+            source, obj = selected
+            payload = ft.build_node_red_payload(obj)
+            if payload is not None:
+                index = source['index']
+                payload.update(camera=f'{self.camera_name}_IN' if index == 0 else self.camera_name,
+                               zone='IN' if index == 0 else 'OUT',
+                               camera_side=CAMERAS[index]['side'], camera_ip=CAMERAS[index]['ip'])
+                if self.sender.send(payload):
+                    self.last_sent = time.monotonic()
+
+        # Log detections with the same ROI/source that was used to qualify them.
+        for source in sources:
+            if source is None:
+                continue
+            index, result = source['index'], source['result']
+            if result['sequence'] != self.last_logged_sequences[index]:
+                self.logger.process(snapshot_frame=display, qualified_detections=source['qualified'],
+                                    source='FUNCTIONAL_TEST_UI2', zone='IN' if index == 0 else 'OUT')
+                self.last_logged_sequences[index] = result['sequence']
+
+        if self.sender is None:
+            reason = 'NODE-RED NONAKTIF'
+        elif not self.presence_supported:
+            reason = 'MODEL TIDAK MENDUKUNG KELAS KENDARAAN'
+        elif loaded:
+            reason = 'LOADED DI ROI | validasi Odoo diperlukan'
+        elif not all_fresh:
+            reason = 'MENUNGGU DUA KAMERA | EMPTY/CLEAR ditahan'
+        elif selected:
+            reason = f"EMPTY {CAMERAS[selected[0]['index']]['side']} | memenuhi syarat Node-RED"
+        elif present:
+            reason = 'KENDARAAN DI ROI | keputusan belum lolos confidence'
+        else:
+            reason = 'ROI KEDUA SISI KOSONG'
+        if reason != self.last_reason or now - self.last_reason_at >= 5:
+            print('[SHARED GATE]', reason)
+            self.last_reason, self.last_reason_at = reason, now
+
+
 def run_dual_camera(functional_test=False):
     from detector import Detector
     from main import get_screen_resolution
@@ -243,13 +332,12 @@ def run_dual_camera(functional_test=False):
     readers = [StreamReader(settings) for settings in CAMERAS]
     views = [dict(ip=c['ip'], online=False, frame=None, detections=[], decisions=[]) for c in CAMERAS]
     worker = InferenceWorker(detector, readers, functional_test)
-    last_event_sequence = None
     validated = [False, False]
     events = None
     fps, fps_frames, fps_since = 0.0, 0, time.perf_counter()
     try:
         if functional_test:
-            events = RightCameraEvents(detector, ui)
+            events = SharedGateEvents(detector, ui)
         cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
         cv2.imshow(WINDOW_NAME, ui.render_dual(views))
         cv2.waitKey(1)
@@ -273,12 +361,12 @@ def run_dual_camera(functional_test=False):
                 fps = fps_frames / (now - fps_since)
                 fps_frames, fps_since = 0, now
             display = ui.render_dual(views, validated, fps)
-            right = results[1]
-            if (events and views[1]['online'] and views[1]['inference_ready']
-                    and right['sequence'] != last_event_sequence):
-                # Events use the exact inferred frame, never the newer display frame.
-                events.process(right, display)
-                last_event_sequence = right['sequence']
+            if events:
+                # Use each exact inferred frame and each side's own ROI.
+                # Do not pass cached AI results for disconnected/stale streams.
+                event_results = [result if view['online'] and view['inference_ready'] else None
+                                 for result, view in zip(results, views)]
+                events.process(event_results, display)
             cv2.imshow(WINDOW_NAME, display)
             remaining_ms = int((1.0 / DISPLAY_TARGET_FPS - (time.perf_counter() - loop_start)) * 1000)
             key = cv2.waitKey(max(1, remaining_ms)) & 0xFF
